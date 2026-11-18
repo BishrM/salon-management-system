@@ -192,8 +192,8 @@ Staging: **https://salonops-staging.vercel.app** (Vercel, `bom1`) on Supabase pr
 
 **Deployment:** HTTPS; `X-Frame-Options: DENY`, HSTS, CSP `frame-ancestors 'none'`; no
 `service_role`/`sb_secret_` in any client bundle; service key stored as a Vercel *Sensitive* variable.
-GitHub → Vercel link **not yet possible** (Vercel account lacks a GitHub login connection — owner
-action); deployed with the CLI from a clean export of the committed branch.
+GitHub → Vercel linked (production branch `salonops-v1`; other branches skipped by the Ignored Build
+Step); earlier deploys used the CLI from a clean export of the committed branch.
 
 **Exercised in the browser on staging (simulated data, all four roles):**
 | Area | Result |

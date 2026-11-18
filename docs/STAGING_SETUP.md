@@ -12,11 +12,11 @@ real staff phone numbers. Production has **not** been created.
 | Test logins | owner, manager, head, counter, outsider (second outlet) — `*@salonops-staging.test`, random passwords kept **only** in the git-ignored `.env.staging.local` on the developer Mac (move them to the team password manager) |
 | Outlets | "Staging Test Salon" and "Isolation Test Outlet (staging)" (simulated data) |
 
-**Still manual:** Vercel cannot link the GitHub repository until the Vercel account has a GitHub
-*Login Connection* (Vercel → Account Settings → Authentication → connect GitHub, then install the Vercel
-GitHub app on `BishrM/salon-management-system`). Until then staging is deployed with the CLI from a clean
-export of the committed branch (§2.5). After connecting: link the repo, set the project's production
-branch to `salonops-v1`; the project's Ignored Build Step already skips every other branch.
+**Deployments:** the Vercel project is linked to GitHub `BishrM/salon-management-system` with production
+branch `salonops-v1`; every push to `salonops-v1` deploys to the staging URL. The project's Ignored
+Build Step (`if [ "$VERCEL_GIT_COMMIT_REF" = "salonops-v1" ]; then exit 1; else exit 0; fi`) skips all
+other branches, including `main`, so no preview or production build is made from them. The CLI deploy
+in §2.5 remains as a fallback.
 
 ---
 
@@ -170,7 +170,7 @@ Pitfall found on staging: a masked/incorrect secret makes **Admin → Users → 
 4. Register an entry on one browser and see it appear live on a second (Realtime).
 5. Run `docs/TABLET_TEST_PLAN.md` and `docs/ACCOUNTING_ACCEPTANCE_TESTS.md` on staging.
 
-### 2.5 Deploying without the GitHub link (current method)
+### 2.5 Deploying without the GitHub link (fallback)
 ```bash
 D=$(mktemp -d); git archive HEAD | tar -x -C "$D"; mkdir "$D/.vercel"; cp .vercel/project.json "$D/.vercel/"
 (cd "$D" && vercel deploy --prod --yes)
