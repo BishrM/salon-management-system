@@ -2,7 +2,7 @@
 
 Audit date: 2026-11-18 · Branch `salonops-v1` · Base commit `398e07d` (+ uncommitted audit changes listed in §9)
 Scope: may SalonOps move to a **hosted staging** environment with test data? This is **not** a
-production-readiness assessment.
+production-readiness assessment. **Update 2026-11-18:** staging is live and was exercised — see §12.
 
 ## 1. Verdict
 **READY FOR STAGING — with conditions.** No critical or high security finding; the authorization model
@@ -180,3 +180,55 @@ Migration 11 was applied to the local database with `supabase migration up --loc
    whole-rupee rule; I1 whether heads may see management names in history.
 4. Paid Supabase plan (backups) before production.
 5. Running the tablet plan on the actual counter tablet (needs staging HTTPS).
+
+## 12. Hosted staging results (2026-11-18)
+Staging: **https://salonops-staging.vercel.app** (Vercel, `bom1`) on Supabase project
+`salonops-staging` (`nzwmfoixqffwqzntvscn`, `ap-south-1`). Both free plans. Details in `STAGING_SETUP.md`.
+
+**Database:** 11 migrations applied with `db push --remote` (no seed). Schema identical to local
+(function bodies + ACLs hash, 21 policies row-by-row, triggers, extensions, Realtime tables).
+`supabase test db --remote`: **330/330**; nothing persisted. Auth pushed from `config.toml`
+`[remotes.staging]`: sign-up off, min 8 chars letters+digits, site/redirect URL = staging; diff 0.
+
+**Deployment:** HTTPS; `X-Frame-Options: DENY`, HSTS, CSP `frame-ancestors 'none'`; no
+`service_role`/`sb_secret_` in any client bundle; service key stored as a Vercel *Sensitive* variable.
+GitHub → Vercel link **not yet possible** (Vercel account lacks a GitHub login connection — owner
+action); deployed with the CLI from a clean export of the committed branch.
+
+**Exercised in the browser on staging (simulated data, all four roles):**
+| Area | Result |
+|---|---|
+| Sign-in / sign-out (owner, manager, head, counter) | pass |
+| Owner setup: cutoff, denominations, initial float ₹2,000 | pass |
+| Employee management (4 employees, head linked to login) | pass |
+| Create login for manager / head / counter | pass after fixing the Vercel secret (D2) |
+| Product catalogue | pass after fix (D1) |
+| Service sales, product sales (cash + Paytm), expenses (drawer + outside), zakat, food | pass — totals = S1 |
+| Paytm CSV import + reconciliation; changed-row re-import (migration 11) | pass |
+| Commission statement and food deduction | pass — 140/100/100/50, payable ₹30 |
+| Commission handover (drawer; later outside-drawer per B13) | pass |
+| Cash reconciliation: ED ₹5,100 = counted, AF ₹2,000, TH ₹3,100 | pass |
+| Submit → reject → resubmit → approve (self-approval flagged) | pass |
+| Reopen → correct entry (₹450→₹550) → resubmit → owner approves (revision 3) | pass |
+| Dashboard, reports, Excel export (valid .xlsx), commission statement | pass |
+| Audit history (who/what/reason, before→after) | pass |
+| Counter blocked from Reports/Admin/Approvals/Dashboard pages and export (403) | pass |
+| Direct API probes (anon, counter, head, manager, other-outlet owner) | **35/35 denied** |
+| Realtime: owner receives entry events; other-outlet owner receives none | pass |
+
+**Defects found on staging and fixed:**
+- **D1 (bug):** Admin → Product catalogue "Add product" always failed with "Invalid input" — the form
+  has no `product` id field and the schema rejected a missing value (the seed hid it locally). Fixed
+  with `optionalUuid` in `lib/action.ts` (also used for the staff login field); unit test added;
+  verified on staging.
+- **D2 (configuration):** "Create login" failed with "Invalid API key" because the Supabase CLI prints a
+  masked secret key unless `--reveal` is used. Re-set the Vercel variable; verified. Documented.
+- **PWA:** PNG/maskable/apple-touch icons, manifest `id`/`scope`, Apple web-app meta added; `.png`
+  excluded from the auth proxy (icons were otherwise redirected to /login); service-worker cache bumped.
+
+**Observation (no change, needs owner review):** while a closing is reopened, the handover section shows
+the previous revision's payable (Rev 6 §5.8) while the commission section shows the live payable; the
+difference is settled after resubmission by an outside-drawer handover.
+
+**Not verified:** offline use and installation on the real counter tablet (`TABLET_TEST_PLAN.md`
+T1–T19); S2–S6, S9–S12 as full UI runs (S1, S7, S8 were run); production (not created).

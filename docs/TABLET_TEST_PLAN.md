@@ -19,7 +19,8 @@ script. Nothing in this document may be reported as passed until it has been run
 ## Prerequisites
 - **HTTPS is mandatory**: service workers only run on `https://` or `http://localhost`. Testing the
   tablet against `http://<Mac LAN IP>:3000` will *not* register the service worker, so offline reload
-  will fail for that reason alone. Use the hosted staging URL (`docs/STAGING_SETUP.md`) or an HTTPS tunnel.
+  will fail for that reason alone. Use the hosted staging URL **https://salonops-staging.vercel.app**
+  (test logins in `.env.staging.local` / the password manager).
 - Record: tablet model, OS version, browser + version, installed as home-screen app (yes/no).
 - Test accounts: counter, second counter, head, manager (staging accounts, test data only).
 - A second device (laptop) signed in as manager with the Dashboard open, to watch totals.
@@ -51,9 +52,10 @@ Each case: run the steps, record PASS/FAIL, screenshots, and the Register's "Thi
 | T19 | Totals before/after | For T4/T8, write down Register totals offline, then Dashboard totals after sync | Identical services, commission, products, expenses, food |
 
 ## Known gaps / compatibility risks (inspect before and during testing)
-1. **No PNG icons / no `apple-touch-icon`**: manifest has one SVG icon. Android Chrome may not offer
-   an install prompt and iPadOS shows a screenshot as the home-screen icon. Add 192/512 PNG and a
-   180×180 apple-touch-icon if T1 fails (asset work, not code logic).
+1. ~~No PNG icons~~ **Resolved 2026-11-18:** manifest now has SVG + 192/512 PNG + a 512 maskable icon,
+   `id`/`scope`; `apple-touch-icon.png` (180×180) and `apple-mobile-web-app-*` meta are served; the
+   icons bypass the sign-in proxy (verified 200 on staging). Installability still has to be confirmed
+   on the real tablet (T1).
 2. **iPadOS Safari**: no Background Sync, Web Locks supported only in recent versions (the runner falls
    back to a single in-page sender), storage may be evicted after ~7 days without use unless installed
    to the home screen. Prefer an Android tablet with Chrome, or install to the home screen on iPad.

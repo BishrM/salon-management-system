@@ -39,6 +39,9 @@ Commission rounding spot checks: S ₹99 → C ₹0 · S ₹100 → ₹10 · S �
 ---
 
 ## S1 — Normal busy day (cash + Paytm, products, expenses, zakat, food, handover)
+**Executed on hosted staging 2026-11-18 through the UI (counter → head → manager → owner): every value
+below matched** (S ₹3,940, C ₹390, allocation 140/100/100/50, payable ₹30, ED ₹5,100, V ₹0, AF ₹2,000,
+TH ₹3,100, SRS N ₹3,100).
 Opening: carried float R = ₹2,000; RF = ₹2,000.
 
 | Entry | Amount |
@@ -130,6 +133,8 @@ Day 2: S ₹1,000; the ₹300 Day-1 lunch is paid from the drawer → shown as "
 (f_prior ₹300) → ED = 2,000 + 1,000 − 300 = **₹2,700**. Day 1's figures do not change.
 
 ## S7 — Paytm reconciliation
+*Staging 2026-11-18:* CSV import of S1's statement (₹1,150 successes + one failed) → no mismatch warning
+once the manual total was entered; a later statement with a changed status was reported, not applied.
 - Paytm total left blank → blocker "Enter today's Paytm total (enter 0 if there was none)".
 - UPI ₹900 + card ₹200 with total ₹1,150 → blocker `split_mismatch`.
 - Product Paytm ₹250 but Paytm total ₹200 → warning "Paytm total is less than product Paytm sales";
@@ -140,7 +145,12 @@ Day 2: S ₹1,000; the ₹300 Day-1 lunch is paid from the drawer → shown as "
   transactions". Re-importing the same file adds nothing; a later statement where a row changed
   status is reported as "differ from the earlier import and were NOT updated".
 
-## S8 — Approved day reopened, corrected, resubmitted (executed 2026-11-18 on the local stack)
+## S8 — Approved day reopened, corrected, resubmitted (executed 2026-11-18 on the local stack and on staging)
+*Staging run:* revision 1 rejected → revision 2 resubmitted and approved (flagged self-approved) →
+reopened, Arun ₹450 → ₹550 → revision 3: S ₹4,040, C ₹400, payable ₹40; the extra ₹10 commission was
+settled after resubmission as an outside-drawer handover (B13; reopening never allows drawer
+handovers). Note for the owner: while a day is reopened, section 5 still shows the previous revision's
+payable (by design, Rev 6 §5.8 `allowed`) while section 4 shows the live figure.
 Day state before: approved revision 1 — S ₹1,650, C ₹160, food ₹200 (₹40 shop-funded, approved),
 expected ₹2,830, counted ₹2,830.
 1. Owner: Reopen for correction, reason given → state "Reopened for correction".

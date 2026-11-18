@@ -1,11 +1,22 @@
-# SalonOps — Hosted staging setup (not yet performed)
+# SalonOps — Hosted staging setup
 
-Status: **documentation only.** No hosted Supabase project or Vercel project has been created. Every
-step below that creates an account, a project or a deployment needs the owner's approval first.
-Staging holds **test data only** — never real salon takings, never real staff phone numbers.
+Status: **staging is running** (set up 2026-11-18). Test data only — never real salon takings, never
+real staff phone numbers. Production has **not** been created.
 
-Prerequisite decisions (see `RELEASE_READINESS.md` §11): approval to push `salonops-v1` to GitHub
-(Vercel deploys from Git). Commit metadata already uses the GitHub noreply address.
+| Item | Value |
+|---|---|
+| App URL | https://salonops-staging.vercel.app (HTTPS, Vercel region `bom1`, Hobby/free plan) |
+| Vercel project | `salonops-staging` (team `bishrpapt-5536s-projects`), Node 24.x, framework Next.js |
+| Supabase project | `salonops-staging`, ref `nzwmfoixqffwqzntvscn`, region `ap-south-1`, Postgres 17, free plan |
+| Branch deployed | `salonops-v1` (never `main`) |
+| Test logins | owner, manager, head, counter, outsider (second outlet) — `*@salonops-staging.test`, random passwords kept **only** in the git-ignored `.env.staging.local` on the developer Mac (move them to the team password manager) |
+| Outlets | "Staging Test Salon" and "Isolation Test Outlet (staging)" (simulated data) |
+
+**Still manual:** Vercel cannot link the GitHub repository until the Vercel account has a GitHub
+*Login Connection* (Vercel → Account Settings → Authentication → connect GitHub, then install the Vercel
+GitHub app on `BishrM/salon-management-system`). Until then staging is deployed with the CLI from a clean
+export of the committed branch (§2.5). After connecting: link the repo, set the project's production
+branch to `salonops-v1`; the project's Ignored Build Step already skips every other branch.
 
 ---
 
@@ -23,8 +34,10 @@ Prerequisite decisions (see `RELEASE_READINESS.md` §11): approval to push `salo
 ### 1.2 Database migrations
 Apply the 11 files in `supabase/migrations/` in filename order, once, with the CLI:
 ```bash
-supabase link --project-ref <staging-ref>
-supabase db push            # applies migrations only; it does NOT run seed.sql
+supabase link --project-ref nzwmfoixqffwqzntvscn
+export SUPABASE_DB_PASSWORD=...      # from the password manager
+supabase db push --remote --dry-run  # CLI 3.x targets the LOCAL stack unless --remote is given
+supabase db push --remote --yes      # applies migrations only; it does NOT run seed.sql
 ```
 - Migrations are one-shot (they `create` objects; re-running one fails on purpose). The CLI's
   migration history table prevents double application. Never edit an applied migration — add one.
@@ -32,7 +45,7 @@ supabase db push            # applies migrations only; it does NOT run seed.sql
   the resulting schema is identical to the local stack (same tables, policies, triggers and function
   hash), and the pgTAP suite passes (330/330).
 - Optional verification against staging (needs the database URL; runs inside transactions that roll back):
-  `supabase test db --remote=<staging db url>` — the CLI asks for confirmation.
+  `supabase test db --remote --yes` — done 2026-11-18: **330/330 pass on staging**, nothing persisted.
 
 ### 1.3 Extensions
 | Extension | Created by | Notes |
@@ -43,7 +56,11 @@ supabase db push            # applies migrations only; it does NOT run seed.sql
 No other database configuration is required: Realtime publication membership (`entries`,
 `closing_events`), RLS, grants and the RPC allow-list are all inside the migrations.
 
-### 1.4 Auth (Dashboard → Authentication)
+### 1.4 Auth (applied with `supabase config push`)
+`supabase/config.toml` has a `[remotes.staging]` block (project ref, site URL, redirect URLs, and
+overrides that keep hosted defaults for email rate limit, MFA, pooler size and vector storage).
+`supabase config diff` must show 0 differences; `supabase config push --yes` applies changes.
+
 | Setting | Value |
 |---|---|
 | Providers | **Email** only (password sign-in). Disable all OAuth providers. |
@@ -73,8 +90,8 @@ callback route, so redirect URLs matter only if those are enabled later.
 ### 1.6 Bootstrap and test accounts
 **Never run `supabase/seed.sql` on a hosted project**: its passwords follow a published pattern and the
 staging URL is reachable from the internet.
-1. Dashboard → Authentication → Add user: `owner+staging@<a domain you control>`, strong unique
-   password, "Auto confirm". Copy the user id.
+1. Create the owner with the Auth admin API (or Dashboard → Authentication → Add user, "Auto confirm"),
+   strong random password. Copy the user id. (Done: owner + a second-outlet owner.)
 2. SQL editor (runs as `postgres`):
    ```sql
    select app.bootstrap_outlet('HUDCO Big Boss (STAGING)', 'Test address', '<owner user id>');
@@ -115,7 +132,7 @@ project, `db push`, bootstrap, and confirm the app works (a full data restore ne
 |---|---|---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | **Public / client-side** | staging project URL | production project URL | Preview + Production |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Public / client-side** (publishable or legacy anon key; safe because RLS protects data) | staging key | production key | Preview + Production |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Server-only secret** — mark *Sensitive*; never `NEXT_PUBLIC_` | staging service-role key | production service-role key | Preview + Production (server) |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Server-only secret** — mark *Sensitive*; never `NEXT_PUBLIC_` | staging **secret key** (`sb_secret_…`) | production secret key | Preview + Production (server) |
 | `NODE_ENV` | set by the platform | — | — | — |
 | `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` | **Development/test-only** (local pgTAP and concurrency scripts) | not set | not set | never in Vercel |
 | `.env.local` values from `supabase status` | **Development/test-only** (local stack keys) | never copy to Vercel | — | — |
@@ -124,6 +141,14 @@ project, `db push`, bootstrap, and confirm the app works (a full data restore ne
   `SUPABASE_SERVICE_ROLE_KEY` appears in `.next/static`.
 - Use **different** Supabase projects (and keys) for Preview and Production; Preview deployments must
   never point at production data.
+
+### 2.1a Setting the variables (what actually worked)
+```bash
+supabase projects api-keys --project-ref nzwmfoixqffwqzntvscn --reveal -o json   # without --reveal the secret is MASKED
+printf '%s' "$SECRET" | vercel env add SUPABASE_SERVICE_ROLE_KEY production --sensitive --force --yes
+```
+Pitfall found on staging: a masked/incorrect secret makes **Admin → Users → Create login** fail with
+"Invalid API key" while everything else works. Redeploy after changing any variable.
 
 ### 2.2 Preview deployments
 - Every pull request gets a preview URL; set Preview env vars to the **staging** project.
@@ -138,9 +163,17 @@ project, `db push`, bootstrap, and confirm the app works (a full data restore ne
 - No OAuth/magic link → no callback route. If email reset is added later, add
   `https://<staging-domain>/auth/callback` to Supabase redirect URLs.
 
-### 2.4 After the first deploy (smoke test)
+### 2.4 After the first deploy (smoke test — done 2026-11-18, see RELEASE_READINESS §12)
 1. Open `/login` over HTTPS; sign in as each test role; confirm the counter is denied Admin/Reports.
 2. Response headers on `/`: `X-Frame-Options: DENY`, `Strict-Transport-Security`, CSP `frame-ancestors 'none'`.
 3. `curl https://<staging>/_next/static/...` bundle grep for `service_role` → nothing.
 4. Register an entry on one browser and see it appear live on a second (Realtime).
 5. Run `docs/TABLET_TEST_PLAN.md` and `docs/ACCOUNTING_ACCEPTANCE_TESTS.md` on staging.
+
+### 2.5 Deploying without the GitHub link (current method)
+```bash
+D=$(mktemp -d); git archive HEAD | tar -x -C "$D"; mkdir "$D/.vercel"; cp .vercel/project.json "$D/.vercel/"
+(cd "$D" && vercel deploy --prod --yes)
+```
+Only committed files are uploaded (no `.env*`). "Production" here is the Vercel project's production
+target of the **staging** project; it is not the salon's production system.

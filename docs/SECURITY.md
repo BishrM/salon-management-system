@@ -37,7 +37,9 @@ Concurrency script: device lock, duplicate ops, initial float, handover overshoo
    covered all four roles, the register, closing, revision 2 (reopen → correct → resubmit → approve),
    Paytm CSV import and login creation. 36 direct API probes (anon, counter, head, manager, other-outlet
    owner) were all denied, and Realtime delivered HUDCO entry events to the owner but not to the other
-   outlet's owner. Not yet exercised: offline use on a real tablet and a hosted staging project.
+   outlet's owner. Hosted staging (2026-11-18, `RELEASE_READINESS.md` §12): pgTAP 330/330 on the hosted
+   database, 35/35 API probes denied, Realtime isolated, full UI walkthrough for all roles. Not yet
+   exercised: offline use on a real tablet; production.
 2. **Dev-only dependency advisory**: `picomatch` ReDoS (GHSA-fc5q-39xc-vjpf) via vitest/eslint
    tooling. Not shipped to production; npm's only fix is a vitest downgrade, which was not applied.
    Production dependencies: 0 known vulnerabilities.
