@@ -1,0 +1,118 @@
+-- LOCAL TEST HARNESS ONLY. A minimal pgTAP-compatible subset (plan, ok, is, isnt, throws_ok,
+-- lives_ok, set_eq, results_eq, finish) so the suite runs without the pgtap extension.
+-- Output lines follow TAP ("ok N - ..." / "not ok N - ..."); scripts/test-db-local.sh greps them.
+-- CI runs the real pgTAP via `supabase test db`.
+
+create table if not exists extensions.tap_state (n int not null, failed int not null, planned int);
+grant select, insert, update, delete on extensions.tap_state to public;
+
+create or replace function extensions.plan(p int) returns text language plpgsql as $$
+begin
+  delete from extensions.tap_state;
+  insert into extensions.tap_state values (0, 0, p);
+  return '1..' || p;
+end $$;
+
+create or replace function extensions._tap(p_ok boolean, p_desc text, p_diag text default null)
+returns text language plpgsql as $$
+declare v_n int;
+begin
+  update extensions.tap_state set n = n + 1, failed = failed + (case when coalesce(p_ok, false) then 0 else 1 end)
+  returning n into v_n;
+  return case when coalesce(p_ok, false) then 'ok ' else 'not ok ' end || v_n || ' - ' || coalesce(p_desc, '')
+      || case when coalesce(p_ok, false) or p_diag is null then '' else E'\n#   ' || replace(p_diag, E'\n', E'\n#   ') end;
+end $$;
+
+create or replace function extensions.ok(p boolean, d text default null) returns text language sql as $$
+  select extensions._tap(p, d)
+$$;
+
+create or replace function extensions."is"(a anyelement, b anyelement, d text default null) returns text language sql as $$
+  select extensions._tap(a is not distinct from b, d, format('have: %s%swant: %s', a, E'\n', b))
+$$;
+
+create or replace function extensions.isnt(a anyelement, b anyelement, d text default null) returns text language sql as $$
+  select extensions._tap(a is distinct from b, d, format('both: %s', a))
+$$;
+
+create or replace function extensions.throws_ok(p_sql text, p_code text, p_msg text, p_desc text)
+returns text language plpgsql as $$
+begin
+  execute p_sql;
+  return extensions._tap(false, p_desc, 'no exception raised');
+exception when others then
+  if (p_code is null or p_code = sqlstate) and (p_msg is null or p_msg = sqlerrm) then
+    return extensions._tap(true, p_desc);
+  end if;
+  return extensions._tap(false, p_desc, format('caught: %s %s; wanted: %s %s', sqlstate, sqlerrm, p_code, p_msg));
+end $$;
+
+create or replace function extensions.throws_ok(p_sql text, p_code text, p_desc text)
+returns text language sql as $$ select extensions.throws_ok(p_sql, p_code, null, p_desc) $$;
+
+create or replace function extensions.throws_ok(p_sql text, p_code text)
+returns text language sql as $$ select extensions.throws_ok(p_sql, p_code, null, null) $$;
+
+create or replace function extensions.lives_ok(p_sql text, p_desc text default null)
+returns text language plpgsql as $$
+begin
+  execute p_sql;
+  return extensions._tap(true, p_desc);
+exception when others then
+  return extensions._tap(false, p_desc, format('died: %s %s', sqlstate, sqlerrm));
+end $$;
+
+create or replace function extensions._rows(p_sql text) returns text[] language plpgsql as $$
+declare v text[];
+begin
+  execute format('select coalesce(array_agg(t::text), ''{}'') from (%s) t', p_sql) into v;
+  return v;
+end $$;
+
+create or replace function extensions._rows_ordered(p_sql text) returns text[] language plpgsql as $$
+declare v text[];
+begin
+  execute format('select coalesce(array_agg(t::text order by o), ''{}'') from (select t, row_number() over () o from (%s) t) s', p_sql) into v;
+  return v;
+end $$;
+
+create or replace function extensions._arr_rows(p anyarray) returns text[] language sql as $$
+  select coalesce(array_agg(row(e)::text order by o), '{}') from unnest(p) with ordinality u(e, o)
+$$;
+
+create or replace function extensions._set_eq(a text[], b text[], d text) returns text language sql as $$
+  select extensions._tap(
+    (select coalesce(array_agg(distinct x order by x), '{}') from unnest(a) x) =
+    (select coalesce(array_agg(distinct x order by x), '{}') from unnest(b) x),
+    d, format('have: %s%swant: %s', a, E'\n', b))
+$$;
+
+create or replace function extensions.set_eq(p_have text, p_want text, d text default null) returns text language sql as $$
+  select extensions._set_eq(extensions._rows(p_have), extensions._rows(p_want), d)
+$$;
+create or replace function extensions.set_eq(p_have text, p_want anyarray, d text default null) returns text language sql as $$
+  select extensions._set_eq(extensions._rows(p_have), extensions._arr_rows(p_want), d)
+$$;
+
+create or replace function extensions.results_eq(p_have text, p_want text, d text default null) returns text language sql as $$
+  select extensions._tap(extensions._rows_ordered(p_have) = extensions._rows_ordered(p_want), d,
+    format('have: %s%swant: %s', extensions._rows_ordered(p_have), E'\n', extensions._rows_ordered(p_want)))
+$$;
+create or replace function extensions.results_eq(p_have text, p_want anyarray, d text default null) returns text language sql as $$
+  select extensions._tap(extensions._rows_ordered(p_have) = extensions._arr_rows(p_want), d,
+    format('have: %s%swant: %s', extensions._rows_ordered(p_have), E'\n', extensions._arr_rows(p_want)))
+$$;
+
+create or replace function extensions.finish() returns setof text language plpgsql as $$
+declare s extensions.tap_state;
+begin
+  select * into s from extensions.tap_state;
+  if s.planned is not null and s.planned <> s.n then
+    return next format('# Looks like you planned %s tests but ran %s', s.planned, s.n);
+  end if;
+  if s.failed > 0 then
+    return next format('# Looks like you failed %s test(s) of %s', s.failed, s.n);
+  end if;
+end $$;
+
+grant execute on all functions in schema extensions to public;

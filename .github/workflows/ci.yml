@@ -1,0 +1,47 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=moderate
+      - name: No server secrets in the client bundle
+        run: "! grep -rIl -e SUPABASE_SERVICE_ROLE_KEY -e service_role .next/static"
+
+  database:
+    # Genuine Supabase stack: migrations + seed + pgTAP (real pgtap extension).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+      - run: supabase db start
+      - run: supabase test db
+
+  database-concurrency:
+    # Two-session race tests and a committed end-to-end day on plain PostgreSQL 17 (auth stub).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: ["54399:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    env: { PGHOST: 127.0.0.1, PGPORT: "54399", PGUSER: postgres }
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y postgresql-client
+      - run: scripts/test-db-local.sh
+      - run: scripts/test-concurrency.sh

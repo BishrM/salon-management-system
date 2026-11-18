@@ -1,0 +1,10 @@
+{
+  "name": "SalonOps",
+  "short_name": "SalonOps",
+  "description": "Daily sales, commission and cash closing for the salon.",
+  "start_url": "/register",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f766e",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

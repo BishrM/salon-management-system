@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+/* One accent (teal) on neutral slate. Light only: the salon tablets and printouts are light;
+   a dark theme adds nothing to the counter workflow. */
+@theme {
+  --color-brand-50: #f0fdfa;
+  --color-brand-100: #ccfbf1;
+  --color-brand-600: #0d9488;
+  --color-brand-700: #0f766e;
+  --color-brand-800: #115e59;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+:focus-visible {
+  outline: 3px solid var(--color-brand-600);
+  outline-offset: 2px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+  .print-full {
+    max-width: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

@@ -1,0 +1,167 @@
+-- Shared pgTAP fixture, included with \ir from each test file (inside its transaction, so it is
+-- rolled back with the test). Not named *.sql so pg_prove does not run it on its own.
+
+-- Local runs (scripts/test-db-local.sh) preload a pgTAP shim and pass -v pgtap_shim=1.
+\if :{?pgtap_shim}
+\else
+create extension if not exists pgtap with schema extensions;
+\endif
+
+create schema tests;
+grant usage on schema tests to authenticated, anon;
+
+create function tests.uid(p_name text) returns uuid language sql immutable as $$
+  select case p_name
+    when 'owner'    then 'a0000000-0000-4000-8000-000000000001'
+    when 'manager'  then 'a0000000-0000-4000-8000-000000000002'
+    when 'head'     then 'a0000000-0000-4000-8000-000000000003'
+    when 'counter'  then 'a0000000-0000-4000-8000-000000000004'
+    when 'counter2' then 'a0000000-0000-4000-8000-000000000005'
+    when 'outsider' then 'a0000000-0000-4000-8000-000000000006'
+    when 'nobody'   then 'a0000000-0000-4000-8000-000000000007'
+    when 'owner2'   then 'a0000000-0000-4000-8000-000000000008'
+  end::uuid
+$$;
+create function tests.outlet(p_name text) returns uuid language sql immutable as $$
+  select case p_name
+    when 'A' then 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    when 'B' then 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  end::uuid
+$$;
+grant execute on all functions in schema tests to authenticated, anon;
+
+create function tests.create_user(p_name text) returns uuid language plpgsql as $$
+begin
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+                          raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+  values (tests.uid(p_name), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+          p_name || '@fixture.test', '', now(), '{}', jsonb_build_object('full_name', initcap(p_name)), now(), now());
+  return tests.uid(p_name);
+end;
+$$;
+
+-- Fixture: outlet A with owner, manager, head, counter, counter2; outlet B owned by outsider;
+-- "nobody" has a login but no membership.
+create function tests.fixture() returns void language plpgsql as $$
+begin
+  perform tests.create_user(n) from unnest(array['owner','manager','head','counter','counter2','outsider','nobody','owner2']) n;
+  insert into public.outlets (id, name) values (tests.outlet('A'), 'Outlet A'), (tests.outlet('B'), 'Outlet B');
+  insert into public.outlet_memberships (outlet_id, profile_id, role, granted_by, reason) values
+    (tests.outlet('A'), tests.uid('owner'),    'owner',   null,               'fixture'),
+    (tests.outlet('A'), tests.uid('manager'),  'manager', tests.uid('owner'), 'fixture'),
+    (tests.outlet('A'), tests.uid('head'),     'head',    tests.uid('owner'), 'fixture'),
+    (tests.outlet('A'), tests.uid('counter'),  'counter', tests.uid('owner'), 'fixture'),
+    (tests.outlet('A'), tests.uid('counter2'), 'counter', tests.uid('owner'), 'fixture'),
+    (tests.outlet('B'), tests.uid('outsider'), 'owner',   null,               'fixture');
+end;
+$$;
+
+-- Switch to an authenticated user for the rest of the transaction (call `reset role;` to undo).
+create function tests.login_as(p_name text) returns void language plpgsql as $$
+begin
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', tests.uid(p_name), 'role', 'authenticated')::text, true);
+  perform set_config('role', 'authenticated', true);
+end;
+$$;
+
+create function tests.login_anon() returns void language plpgsql as $$
+begin
+  perform set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+  perform set_config('role', 'anon', true);
+end;
+$$;
+
+select tests.fixture();
+
+-- M2+ fixture helpers -------------------------------------------------------------------------------
+-- Staff of outlet A (and one in B); `headstaff` is the head employee's staff record (linked login).
+create function tests.staff(p_name text) returns uuid language sql immutable as $$
+  select case p_name
+    when 'A'         then '5aaa0000-0000-4000-8000-00000000000a'
+    when 'B'         then '5aaa0000-0000-4000-8000-00000000000b'
+    when 'C'         then '5aaa0000-0000-4000-8000-00000000000c'
+    when 'headstaff' then '5aaa0000-0000-4000-8000-0000000000aa'
+    when 'counter2staff' then '5aaa0000-0000-4000-8000-0000000000c2'
+    when 'Bstaff'    then '5bbb0000-0000-4000-8000-00000000000b'
+  end::uuid
+$$;
+grant execute on function tests.staff(text) to authenticated, anon;
+
+-- Operational fixture: cutoff 04:00 on A and B, staff, a catalogue item.
+create function tests.ops_fixture() returns void language plpgsql as $$
+begin
+  update public.outlets set day_cutoff = '04:00' where id in (tests.outlet('A'), tests.outlet('B'));
+  insert into public.staff (id, full_name, profile_id) values
+    (tests.staff('A'), 'Asha', null), (tests.staff('B'), 'Bilal', null), (tests.staff('C'), 'Chetan', null),
+    (tests.staff('headstaff'), 'Head Hari', tests.uid('head')),
+    (tests.staff('counter2staff'), 'Counter Two', tests.uid('counter2')),
+    (tests.staff('Bstaff'), 'Other Outlet Staff', null);
+  insert into public.staff_assignments (staff_id, outlet_id, start_date)
+  select s, tests.outlet('A'), date '2020-01-01'
+    from unnest(array[tests.staff('A'), tests.staff('B'), tests.staff('C'), tests.staff('headstaff'),
+                      tests.staff('counter2staff')]) s;
+  insert into public.staff_assignments (staff_id, outlet_id, start_date)
+  values (tests.staff('Bstaff'), tests.outlet('B'), date '2020-01-01');
+  insert into public.product_catalog (id, outlet_id, name, default_price)
+  values ('9a000000-0000-4000-8000-000000000001', tests.outlet('A'), 'Hair oil', 25000);
+end;
+$$;
+
+-- One online op for sync_ops (device clock = server clock).
+create function tests.op(p_type text, p_record uuid, p_seq bigint, p_data jsonb,
+                         p_extra jsonb default '{}') returns jsonb language sql as $$
+  select jsonb_build_object('op_id', gen_random_uuid(), 'device_seq', p_seq, 'type', p_type,
+    'record_id', p_record, 'device_time', now(), 'device_offset_ms', 0,
+    'device_last_sync_at', now(), 'data', p_data) || p_extra
+$$;
+grant execute on function tests.op(text, uuid, bigint, jsonb, jsonb) to authenticated;
+
+-- Direct fixture insert of a dated, active entry (bypasses RPCs; superuser only).
+create function tests.entry(p_kind text, p_rupees bigint, p_date date, p_extra jsonb default '{}')
+returns uuid language plpgsql as $$
+declare v_id uuid := gen_random_uuid();
+begin
+  insert into public.entries (id, outlet_id, kind, amount, staff_id, product_id, product_name, quantity,
+    unit_price, payment_method, expense_source, meal, description, recorded_by, op_id,
+    business_date, date_basis)
+  values (v_id, coalesce((p_extra ->> 'outlet_id')::uuid, tests.outlet('A')), p_kind::public.entry_kind,
+    p_rupees * 100, (p_extra ->> 'staff_id')::uuid,
+    case when p_kind = 'product' then '9a000000-0000-4000-8000-000000000001'::uuid end,
+    case when p_kind = 'product' then 'Hair oil' end,
+    case when p_kind = 'product' then 1 end,
+    case when p_kind = 'product' then p_rupees * 100 end,
+    case when p_kind = 'product' then coalesce(p_extra ->> 'payment_method', 'cash')::public.payment_method end,
+    case when p_kind = 'expense' then coalesce(p_extra ->> 'expense_source', 'cash_drawer')::public.expense_source end,
+    case when p_kind = 'food' then 'lunch'::public.meal end,
+    case when p_kind = 'expense' then 'supplies' end,
+    tests.uid('counter'), gen_random_uuid(), p_date, 'online');
+  return v_id;
+end;
+$$;
+
+-- Direct fixture insert of a food payment.
+create function tests.food_pay(p_food uuid, p_rupees bigint, p_date date, p_from text default 'drawer')
+returns uuid language plpgsql as $$
+declare v_id uuid := gen_random_uuid();
+begin
+  insert into public.food_payments (id, outlet_id, food_id, amount, paid_from, recorded_by, op_id, business_date, date_basis)
+  values (v_id, tests.outlet('A'), p_food, p_rupees * 100, p_from, tests.uid('counter'), gen_random_uuid(), p_date, 'online');
+  return v_id;
+end;
+$$;
+
+-- Establish the initial float directly (owner action), effective p_date, p_rupees in ₹500 notes.
+create function tests.initial_float(p_rupees bigint, p_date date) returns uuid language plpgsql as $$
+declare v_id uuid;
+begin
+  insert into public.float_movements (outlet_id, type, effective_business_date, timing, amount, source,
+    denominations, authorised_by, recorded_by, reason, confirmation)
+  values (tests.outlet('A'), 'initial_float', p_date, 'pre_opening', p_rupees * 100, 'owner_funds',
+    jsonb_build_object('50000', p_rupees / 500), tests.uid('owner'), tests.uid('owner'), 'initial float',
+    jsonb_build_object('method', 'single_action_retyped_total', 'entered_by', tests.uid('owner'),
+      'confirmed_by', tests.uid('owner'), 'self_confirmed', true, 'retyped_total', p_rupees * 100))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
