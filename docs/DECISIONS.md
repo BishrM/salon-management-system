@@ -27,6 +27,7 @@ defaults and **still need the owner's confirmation**.
 | D-18 | Dashboard visible to owner, manager and head; register to all roles. | SRS §5.3 head "viewing outlet sales"; §5.5 counter "viewing relevant daily totals" (shown on the Register). | Owner/manager only. | — |
 | D-19 | Local database tests run on plain PostgreSQL 17 with a stub of Supabase's `auth` schema and a pgTAP-compatible shim (`supabase/tests/local/`). CI also runs the genuine `supabase test db`. | Docker could not start on the development machine (disk 99 % full) and building pgTAP from source was not permitted in this session. | Wait for Docker. | Same test files run in both; the shim implements only the pgTAP functions used. |
 | D-20 | Realtime publication on `entries` and `closing_events`; dashboard also polls every 60 s. | Live dashboard (SRS §7.1) with a fallback if Realtime is unavailable. | Polling only. | — |
+| D-21 | Audit rows without an outlet (global `staff` and `profiles` tables) are visible only to a holder of `audit.read` in an outlet the staff member is assigned to / the profile is a member of; other outlet-less rows are hidden (migration `…001200`). | Staging S12 (2026-11-19) showed any owner could read every outlet's staff and user names through these rows — a cross-outlet leak (defect D3). | Add `outlet_id` to staff/profile audit rows (staff and profiles can belong to several outlets). | Security fix; owners still see their own staff and members' history; no business rule changes. |
 
 ## Confirmed business decisions (unchanged)
 D1 commission pool `FLOOR(S×10%/₹10)×₹10`, split by largest remainder in ₹10 units · D2 food at pool level,
@@ -51,6 +52,20 @@ earlier ones are pending; approval in date order.
 | B13 | Commission not handed over at closing leaves with take-home and is settled by an outside-drawer handover. |
 | B14 | Food paid by the head from personal cash: recorded as `outside_drawer`; reimbursement outside the system. |
 | B15 | Food form defaults to "Paid now from drawer". |
+
+## Open owner questions from staging acceptance (2026-11-19)
+Implemented behaviour is unchanged; each needs the owner's yes/no (display or rule).
+| # | Question | Current behaviour |
+|---|---|---|
+| A1 | May the counter role take part in closing? | Counter records entries only; closing is head/manager/owner. |
+| A3 | Must a food-excess approval be repeated after any change to food cost or pool? | Yes — tied to the exact amounts (seen in S9: ₹150 → ₹120 needed a new approval). |
+| A7 | Should a later Paytm statement supersede earlier imported rows? | No — changed rows are reported, never overwritten. |
+| A8 | Single-sale cap/warning; keep the whole-rupee rule (D-07)? | No cap; whole rupees only. |
+| I1 | May heads see management names in closing history? | Hidden from heads ("— —"), visible to manager/owner. |
+| O-R1 | Reopened closing: section 5 shows the previous revision's payable while section 4 shows the live figure (Rev 6 §5.8). Keep? | Settled after resubmission by an outside-drawer handover (S8). |
+| O-R2 | After an outside-drawer settlement, the approved revision still says "commission still owed to head ₹X" (frozen snapshot); section 5 shows "Fully handed over". Add a "settled since" note? | Snapshot text unchanged (S5). |
+| O-R3 | While a submitted day has undecided late entries, the live sections show totals including them (S9: ₹1,530 vs revision ₹1,180) without a label. Add a label, or exclude undecided entries from the live view? | Live view includes them so "include" can be previewed; the revision is the official record. |
+| O-R4 | Opening-float flag on the next day can only be acknowledged when the corrected float equals the one used; otherwise that day must be reopened and recounted (Rev 6 §5.5, S10). Confirm. | As described. |
 
 ## Paytm sources
 - Transaction Status API — https://www.paytmpayments.com/docs/api/v3/transaction-status-api/

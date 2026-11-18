@@ -40,6 +40,10 @@ Concurrency script: device lock, duplicate ops, initial float, handover overshoo
    outlet's owner. Hosted staging (2026-11-18, `RELEASE_READINESS.md` §12): pgTAP 330/330 on the hosted
    database, 35/35 API probes denied, Realtime isolated, full UI walkthrough for all roles. Not yet
    exercised: offline use on a real tablet; production.
+   **Fixed 2026-11-19 (D3):** audit rows of the outlet-less `staff`/`profiles` tables were readable by
+   any owner (cross-outlet names leak), found in staging S12. Migration `…001200` restricts them to
+   `audit.read` holders of an outlet the row belongs to; pgTAP 334/334; applied to staging and
+   re-checked there. Immutability re-probed on staging: 36/36 UPDATE/DELETE attempts refused.
 2. **Dev-only dependency advisory**: `picomatch` ReDoS (GHSA-fc5q-39xc-vjpf) via vitest/eslint
    tooling. Not shipped to production; npm's only fix is a vitest downgrade, which was not applied.
    Production dependencies: 0 known vulnerabilities.

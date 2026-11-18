@@ -46,6 +46,11 @@ supabase db push --remote --yes      # applies migrations only; it does NOT run 
   hash), and the pgTAP suite passes (330/330).
 - Optional verification against staging (needs the database URL; runs inside transactions that roll back):
   `supabase test db --remote --yes` — done 2026-11-18: **330/330 pass on staging**, nothing persisted.
+- 2026-11-19: migration 12 (`…001200_audit_global_rows`) pushed with `db push --remote --yes`; fresh
+  PostgreSQL 17 + 12 migrations: pgTAP 334/334. Without `SUPABASE_DB_PASSWORD` exported, CLI 3.2's
+  temporary login role cannot create the `tests` schema, so `test db --remote` needs the password
+  (`--db-url`, see `RELEASE_READINESS.md` §13). Read-only checks work without it:
+  `supabase db query --remote --read-only "<sql>"`.
 
 ### 1.3 Extensions
 | Extension | Created by | Notes |

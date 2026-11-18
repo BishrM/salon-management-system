@@ -3,6 +3,8 @@
 Audit date: 2026-11-18 · Branch `salonops-v1` · Base commit `398e07d` (+ uncommitted audit changes listed in §9)
 Scope: may SalonOps move to a **hosted staging** environment with test data? This is **not** a
 production-readiness assessment. **Update 2026-11-18:** staging is live and was exercised — see §12.
+**Update 2026-11-19:** all twelve accounting scenarios have now passed on staging; one security defect
+(D3) was found and fixed — see §13. SalonOps is **not production-ready** (§13, "Remaining blockers").
 
 ## 1. Verdict
 **READY FOR STAGING — with conditions.** No critical or high security finding; the authorization model
@@ -231,4 +233,68 @@ the previous revision's payable (Rev 6 §5.8) while the commission section shows
 difference is settled after resubmission by an outside-drawer handover.
 
 **Not verified:** offline use and installation on the real counter tablet (`TABLET_TEST_PLAN.md`
-T1–T19); S2–S6, S9–S12 as full UI runs (S1, S7, S8 were run); production (not created).
+T1–T19); S2–S6, S9–S12 as full UI runs (S1, S7, S8 were run — the rest ran on 2026-11-19, §13);
+production (not created).
+
+## 13. Staging acceptance run (2026-11-19)
+Scenarios S2–S6 and S9–S12 run on https://salonops-staging.vercel.app with simulated data; the user
+signed in to each role in the browser pane (no credentials were read by the agent). Full results,
+adaptations and figures: `ACCOUNTING_ACCEPTANCE_TESTS.md`.
+
+| Scenario | Result | How |
+|---|---|---|
+| S2 food excess + shortage + reject/resubmit | PASS | UI (Register + closing); server-side variance acknowledgement verified |
+| S3 top-ups, required float ₹3,000, shortfall | PASS | UI; entries via `/api/sync`; own test outlet |
+| S4 overage | PASS | UI; entries via `/api/sync`; own test outlet |
+| S5 commission owed to head (B13) | PASS | UI; entries via `/api/sync`; B10 over-handed path not run in UI |
+| S6 food paid on a later day | PASS | two real business days; day 2 through the Register UI |
+| S9 late entry after submission | PASS | **simulated** offline ops via `/api/sync`; decisions in UI |
+| S10 approval order + previous-day correction | PASS | UI; doc wording corrected to Rev 6 §5.5 |
+| S11 future timestamp | PASS | **simulated** clock via `/api/sync`; date assigned in UI |
+| S12 audit history and immutability | PASS after fix | UI + database probe (36/36 refused); D3 fixed |
+
+**Test setup on staging (all test data):** four outlets created with the documented
+`app.bootstrap_outlet` ("Staging S3 (top-ups)", "Staging S4 (overage)", "Staging S5 (no handover)",
+"Staging S6+S10 (two days)") plus one unused ("Staging S6 (food later)", holds a single voided ₹50 test
+expense); setup through the app's RPCs as the staging owner. Owner cut-off was set to 00:00 on five
+outlets during the run (server time was before 04:00 IST) and **restored to 04:00 through Admin → Setup;
+verified in the database** (Staging Test Salon and the four S-outlets: `04:00:00`; the Isolation outlet
+was never changed). All test closings end approved; no undated entries remain. Nothing was deleted.
+
+**Defect found and fixed:**
+- **D3 (security, medium):** audit rows of the global `staff` and `profiles` tables have no
+  `outlet_id`; the `audit_logs` policy let *any* owner read all of them, so the other outlet's owner saw
+  29 rows with Staging Test Salon's staff and user names. Fix: migration
+  `20261118001200_audit_global_rows.sql` (rows visible only with `audit.read` in an outlet the staff
+  member/profile belongs to). pgTAP `03_rls_test` +4 tests (failed 2/26 before, pass after). Applied to
+  staging with `db push --remote`; re-check on staging: other-outlet owner 0 staff rows (only their own
+  profile row), owner still sees their staff, manager none.
+
+**Findings recorded for the owner (no code change):** O-R2 frozen revision still says "commission still
+owed" after settlement; O-R3 live figures on a submitted day include undecided late entries without a
+label; O-R4 opening-float flag requires reopen unless amounts match — see `DECISIONS.md`. Minor UX: the
+Register's "Unpaid food" list cleared only after a reload (S6).
+
+**Checks after the fix:**
+| Check | Result |
+|---|---|
+| `npm run lint` | exit 0 |
+| `npx tsc --noEmit` | exit 0 |
+| `npx vitest run` | 4 files, **55/55** |
+| `supabase test db` (local stack, migration 12 applied with `migration up`) | 8 files, **334/334** PASS |
+| `scripts/test-db-local.sh` (fresh throwaway PostgreSQL 17, 12 migrations) | **334/334** |
+| `npm run build` | exit 0 |
+| `.next/static` grep `service_role\|SUPABASE_SERVICE_ROLE_KEY` | 0 files |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| `supabase test db --remote` | **not re-run**: without the DB password the CLI's temporary login role cannot create the test schema ("permission denied for database postgres"); the password lives in `.env.staging.local`, which the agent was told not to read. Run it yourself (below). |
+
+To re-run pgTAP on staging yourself:
+`supabase test db --db-url "postgresql://postgres.nzwmfoixqffwqzntvscn:$(grep '^SUPABASE_DB_PASSWORD=' .env.staging.local | cut -d= -f2-)@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require"`
+
+**Remaining blockers before production (SalonOps is not production-ready):**
+1. Real counter tablet: `TABLET_TEST_PLAN.md` T1–T19 not run (install, offline use, sync, recovery).
+2. Owner sign-off on the scenario results and on B1–B15, A1/A3/A7/A8, I1 and O-R1–O-R4 (`DECISIONS.md`).
+3. SRS §15: two weeks of parallel paper running with zero unexplained differences.
+4. Production Supabase (paid plan for backups) and Vercel projects — need explicit approval; never
+   reuse staging keys.
+5. Optional: re-run `supabase test db` against staging with the DB password (above).

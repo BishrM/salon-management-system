@@ -1,7 +1,7 @@
 begin;
 \ir helpers.psql
 
-select plan(22);
+select plan(26);
 
 insert into public.staff (id, full_name) values
   ('cccccccc-0000-4000-8000-00000000000a', 'Stylist A'),
@@ -36,6 +36,18 @@ select ok((select count(*) from public.audit_logs where outlet_id = tests.outlet
 select is((select count(*)::int from public.audit_logs where outlet_id = tests.outlet('B')), 0,
   'owner of A cannot read outlet B audit rows');
 select is((select count(*)::int from public.staff where full_name = 'Stylist B'), 0, 'owner of A cannot see outlet B staff');
+select ok(exists (select 1 from public.audit_logs where table_name = 'staff' and row_id = 'cccccccc-0000-4000-8000-00000000000a'),
+  'owner of A reads audit rows of outlet A staff');
+reset role;
+
+-- Audit rows of global tables (staff, profiles) have no outlet_id: never visible across outlets (S12).
+select tests.login_as('outsider');
+select is((select count(*)::int from public.audit_logs where table_name = 'staff' and row_id = 'cccccccc-0000-4000-8000-00000000000a'), 0,
+  'owner of B cannot read audit rows of outlet A staff');
+select is((select count(*)::int from public.audit_logs where table_name = 'profiles' and row_id = tests.uid('counter')), 0,
+  'owner of B cannot read audit rows of outlet A member profiles');
+select ok(exists (select 1 from public.audit_logs where table_name = 'staff' and row_id = 'cccccccc-0000-4000-8000-00000000000b'),
+  'owner of B reads audit rows of their own staff');
 reset role;
 
 select tests.login_as('nobody');
