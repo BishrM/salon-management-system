@@ -72,3 +72,21 @@ export function toIsoIST(raw: string): string | null {
   }
   return null;
 }
+
+/** Columns the Paytm import needs; `hint` guesses the column from the CSV header. */
+export const PAYTM_FIELDS = [
+  { key: "ref", label: "Transaction / order ID", hint: /^(?!.*(date|time|amount|status)).*(order|txn|transaction|utr|ref)/i, required: true },
+  { key: "time", label: "Date and time", hint: /date|time/i, required: true },
+  { key: "amount", label: "Amount", hint: /amount/i, required: true },
+  { key: "status", label: "Status", hint: /status/i, required: true },
+  { key: "method", label: "Payment mode (optional)", hint: /mode|method|instrument/i, required: false },
+] as const;
+
+export function guessPaytmColumns(header: string[]): Record<string, number> {
+  const guess: Record<string, number> = {};
+  for (const f of PAYTM_FIELDS) {
+    const i = header.findIndex((h) => f.hint.test(h));
+    if (i >= 0) guess[f.key] = i;
+  }
+  return guess;
+}

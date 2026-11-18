@@ -31,7 +31,7 @@ export default async function Users() {
               <div><label className={labelCls} htmlFor="em">Email</label><input id="em" name="email" type="email" className={input} required /></div>
               <div><label className={labelCls} htmlFor="pw">Temporary password (8+ characters, a letter and a digit)</label><input id="pw" name="password" type="text" autoComplete="new-password" className={input} required minLength={8} /></div>
               <div><label className={labelCls} htmlFor="rl">Role</label>
-                <select id="rl" name="role" className={input}>{Object.entries(ROLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+                <select id="rl" name="role" className={input} defaultValue="counter">{Object.entries(ROLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
             </div>
           </ActionForm>
         </Card>
@@ -53,7 +53,7 @@ export default async function Users() {
             <div className="mt-2"><ActionForm action={addMembership} submit="Add role" inline>
               <input type="hidden" name="outlet" value={outlet.id} />
               <div><label className={labelCls} htmlFor="ap">User id</label><input id="ap" name="profile" className={input} required placeholder="uuid" /></div>
-              <div><label className={labelCls} htmlFor="ar">Role</label><select id="ar" name="role" className={input}>{Object.entries(ROLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+              <div><label className={labelCls} htmlFor="ar">Role</label><select id="ar" name="role" className={input} defaultValue="counter">{Object.entries(ROLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
               <div><label className={labelCls} htmlFor="aw">Reason</label><input id="aw" name="reason" className={input} required /></div>
             </ActionForm></div>
           </details>

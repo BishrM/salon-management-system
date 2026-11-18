@@ -65,5 +65,7 @@ export function friendlyError(e: { message?: string; code?: string } | null | un
   if (!e) return "Something went wrong.";
   if (e.code === "42501") return "You do not have permission to do this.";
   if (e.code === "23505" && !/initial float/.test(e.message ?? "")) return e.message ?? "Already exists.";
-  return e.message?.replace(/^closing cannot be submitted: /, "Cannot submit yet: ") ?? "Something went wrong.";
+  const blocked = e.message?.match(/^closing cannot be submitted: (.*)$/);
+  if (blocked) return `Cannot submit yet: ${blocked[1].split(", ").map((b) => BLOCKERS[b] ?? b).join(" ")}`;
+  return e.message ?? "Something went wrong.";
 }

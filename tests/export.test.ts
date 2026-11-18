@@ -73,3 +73,12 @@ describe("Paytm CSV helpers", () => {
     expect(toIsoIST("yesterday")).toBeNull();
   });
 });
+
+import { guessPaytmColumns } from "@/lib/csv";
+
+describe("guessPaytmColumns", () => {
+  it("does not take a 'Transaction Date' column as the transaction ID", () => {
+    const g = guessPaytmColumns(["Transaction Date", "Order ID", "Amount", "Status", "Payment Mode"]);
+    expect(g).toEqual({ ref: 1, time: 0, amount: 2, status: 3, method: 4 });
+  });
+});

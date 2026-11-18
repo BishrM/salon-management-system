@@ -16,3 +16,13 @@ describe("optionalRupeesToPaise", () => {
     expect(p.safeParse("-1").success).toBe(false);
   });
 });
+
+import { friendlyError, BLOCKERS } from "@/lib/labels";
+
+describe("friendlyError", () => {
+  it("turns submit blocker codes into plain-language labels", () => {
+    const msg = friendlyError({ message: "closing cannot be submitted: food_excess_unallocated, paytm_missing" });
+    expect(msg).toBe(`Cannot submit yet: ${BLOCKERS.food_excess_unallocated} ${BLOCKERS.paytm_missing}`);
+    expect(msg).not.toMatch(/_/);
+  });
+});

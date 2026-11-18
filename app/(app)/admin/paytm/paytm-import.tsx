@@ -1,17 +1,9 @@
 "use client";
 import { useMemo, useState, useTransition } from "react";
-import { parseCsv, amountToPaise, normaliseStatus, normaliseMethod, toIsoIST } from "@/lib/csv";
+import { parseCsv, amountToPaise, normaliseStatus, normaliseMethod, toIsoIST, PAYTM_FIELDS as FIELDS, guessPaytmColumns } from "@/lib/csv";
 import { importPaytm } from "../../actions";
 import { btnPrimary, input, labelCls } from "@/components/ui";
 import { rupees } from "@/lib/money";
-
-const FIELDS = [
-  { key: "ref", label: "Transaction / order ID", hint: /order|txn|transaction|utr|ref/i, required: true },
-  { key: "time", label: "Date and time", hint: /date|time/i, required: true },
-  { key: "amount", label: "Amount", hint: /amount/i, required: true },
-  { key: "status", label: "Status", hint: /status/i, required: true },
-  { key: "method", label: "Payment mode (optional)", hint: /mode|method|instrument/i, required: false },
-] as const;
 
 export function PaytmImport({ outletId }: { outletId: string }) {
   const [name, setName] = useState("");
@@ -47,9 +39,7 @@ export function PaytmImport({ outletId }: { outletId: string }) {
           setName(f.name);
           setRows(r);
           setMsg(null);
-          const guess: Record<string, number> = {};
-          FIELDS.forEach((fl) => { const i = (r[0] ?? []).findIndex((h) => fl.hint.test(h)); if (i >= 0) guess[fl.key] = i; });
-          setMap(guess);
+          setMap(guessPaytmColumns(r[0] ?? []));
         }} /></div>
       {header.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-3">
