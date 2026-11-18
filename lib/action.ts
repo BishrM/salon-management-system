@@ -30,6 +30,8 @@ export async function rpcAction<S extends z.ZodTypeAny>(
 
 // Shared field schemas -----------------------------------------------------------------------------
 export const uuid = z.string().uuid("Invalid id");
+/** An id that may be blank or absent (e.g. "new record" forms that omit the field) → null. */
+export const optionalUuid = z.union([uuid, z.literal("")]).optional().transform((v) => v || null);
 export const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date");
 export const reason = z.string().trim().min(1, "A reason is required").max(500, "Reason is too long");
 /** Whole rupees from a form, converted to paise. */

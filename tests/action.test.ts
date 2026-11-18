@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { optionalRupeesToPaise } from "@/lib/action";
+import { optionalRupeesToPaise, optionalUuid } from "@/lib/action";
 
 describe("optionalRupeesToPaise", () => {
   const p = optionalRupeesToPaise("Paytm");
@@ -24,5 +24,16 @@ describe("friendlyError", () => {
     const msg = friendlyError({ message: "closing cannot be submitted: food_excess_unallocated, paytm_missing" });
     expect(msg).toBe(`Cannot submit yet: ${BLOCKERS.food_excess_unallocated} ${BLOCKERS.paytm_missing}`);
     expect(msg).not.toMatch(/_/);
+  });
+});
+
+describe("optionalUuid", () => {
+  it("accepts an absent or blank id as a new record (Add product form has no id field)", () => {
+    expect(optionalUuid.parse(undefined)).toBeNull();
+    expect(optionalUuid.parse("")).toBeNull();
+  });
+  it("keeps a valid id and rejects garbage", () => {
+    expect(optionalUuid.parse("5eed0000-0000-4000-8000-000000000001")).toBe("5eed0000-0000-4000-8000-000000000001");
+    expect(optionalUuid.safeParse("nope").success).toBe(false);
   });
 });

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
-import { rpcAction, uuid, date, reason, rupeesToPaise, optionalRupeesToPaise, type ActionResult } from "@/lib/action";
+import { rpcAction, uuid, optionalUuid, date, reason, rupeesToPaise, optionalRupeesToPaise, type ActionResult } from "@/lib/action";
 import { friendlyError } from "@/lib/labels";
 import { OUTLET_COOKIE } from "@/lib/session";
 
@@ -70,7 +70,7 @@ export async function setOutletDetails(fd: FormData) {
 export async function createStaff(fd: FormData) {
   return rpcAction(
     z.object({ outlet: uuid, name: z.string().trim().min(1, "Name is required").max(120), start: date,
-      profile: z.union([uuid, z.literal("")]).transform((v) => v || null) }),
+      profile: optionalUuid }),
     obj(fd), "create_staff",
     (v) => ({ p_outlet: v.outlet, p_full_name: v.name, p_start_date: v.start, p_profile_id: v.profile }), "Employee added.");
 }
@@ -103,7 +103,7 @@ export async function updateStaff(fd: FormData) {
 // Catalogue ------------------------------------------------------------------------------------------
 export async function upsertProduct(fd: FormData) {
   return rpcAction(
-    z.object({ outlet: uuid, product: z.union([uuid, z.literal("")]).transform((v) => v || null),
+    z.object({ outlet: uuid, product: optionalUuid,
       name: z.string().trim().min(1, "Name is required").max(120), price: rupeesToPaise("Price"),
       active: z.enum(["true", "false"]).default("true") }),
     obj(fd), "upsert_product",

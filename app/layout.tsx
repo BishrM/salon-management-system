@@ -6,7 +6,8 @@ export const metadata: Metadata = {
   title: { default: "SalonOps", template: "%s · SalonOps" },
   description: "Daily sales, commission and cash closing for the salon.",
   manifest: "/manifest.webmanifest",
-  icons: { icon: "/icon.svg" },
+  icons: { icon: "/icon.svg", apple: "/apple-touch-icon.png" },
+  appleWebApp: { capable: true, title: "SalonOps", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

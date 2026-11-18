@@ -2,8 +2,8 @@
 // - Static build assets: cache-first (they are content-hashed).
 // - Page navigations: network-first; on failure serve the last cached copy of that page, else offline.html.
 // - API calls and non-GET requests are never cached (financial data goes through the IndexedDB outbox).
-const VERSION = "salonops-v1";
-const SHELL = ["/offline.html", "/icon.svg", "/manifest.webmanifest"];
+const VERSION = "salonops-v2";
+const SHELL = ["/offline.html", "/icon.svg", "/icon-192.png", "/apple-touch-icon.png", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

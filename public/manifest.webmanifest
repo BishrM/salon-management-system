@@ -2,9 +2,17 @@
   "name": "SalonOps",
   "short_name": "SalonOps",
   "description": "Daily sales, commission and cash closing for the salon.",
+  "id": "/register",
   "start_url": "/register",
+  "scope": "/",
+  "orientation": "any",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#0f766e",
-  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
 }
