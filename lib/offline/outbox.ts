@@ -120,10 +120,14 @@ export async function enqueue(
   return row;
 }
 
-export async function listOps(): Promise<OutboxRow[]> {
+/**
+ * The signed-in user's ops only, in device_seq order. Every read is scoped by user: on a shared tablet a
+ * different account never sees, sends, exports or clears another account's queued ops.
+ */
+export async function listOps(userId: string): Promise<OutboxRow[]> {
   const tx = (await db()).transaction("ops", "readonly");
   const rows = (await val(tx.objectStore("ops").index("seq").getAll())) as OutboxRow[];
-  return rows;
+  return rows.filter((r) => r.user_id === userId);
 }
 
 export async function updateOps(updates: { op_id: string; status: OpStatus; error?: string; result?: Record<string, unknown> }[]) {
@@ -136,16 +140,34 @@ export async function updateOps(updates: { op_id: string; status: OpStatus; erro
   await done(tx);
 }
 
-/** Remove synced ops older than a day, and failed ops the user cleared (server keeps its copy). */
-export async function removeOps(opIds: string[]) {
+/** Remove ops the server has recorded (e.g. a failed op the sender withdrew). Only the owner's rows. */
+export async function removeOps(userId: string, opIds: string[]) {
   const tx = (await db()).transaction("ops", "readwrite");
-  opIds.forEach((id) => tx.objectStore("ops").delete(id));
+  const store = tx.objectStore("ops");
+  for (const id of opIds) {
+    const row = (await val(store.get(id))) as OutboxRow | undefined;
+    if (row?.user_id === userId) store.delete(id);
+  }
   await done(tx);
 }
 
 /** "Save pending entries" export (§6.2 step 4): everything not yet synced, with the device id. */
-export async function exportPending(): Promise<string> {
+export async function exportPending(userId: string): Promise<string> {
   const meta = await getMeta();
-  const rows = (await listOps()).filter((r) => r.status !== "synced");
+  const rows = (await listOps(userId)).filter((r) => r.status !== "synced");
   return JSON.stringify({ format: "salonops-pending-v1", device_id: meta.device_id, exported_at: new Date().toISOString(), rows }, null, 2);
+}
+
+/**
+ * Can unsent ops be left on this device safely (e.g. while another account signs in)? Only when the
+ * browser has granted persistent storage, so it will not evict the queue under storage pressure.
+ */
+export async function storageIsDurable(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persisted) return false;
+    if (await navigator.storage.persisted()) return true;
+    return (await navigator.storage.persist?.()) ?? false;
+  } catch {
+    return false;
+  }
 }

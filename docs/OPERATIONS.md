@@ -39,6 +39,7 @@ add a new one):
 | `…000900_closing_engine` | accounting, lifecycle, approval ordering, float, handovers, Paytm import |
 | `…001000_security_and_grants` | RLS for new tables, RPC allow-list, Realtime |
 | `…001100_paytm_import_changes` | Paytm re-import reports rows whose amount/status changed (never overwrites) |
+| `…001300_food_void_and_withdraw` | paid-food "remove and cancel payment" in one op; `blocked_by`; sender can withdraw a failed op (D-22, D-23) |
 | `…001200_audit_global_rows` | audit rows of `staff`/`profiles` visible only to `audit.read` holders of an outlet they belong to (D3) |
 
 ```bash

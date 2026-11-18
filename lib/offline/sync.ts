@@ -4,7 +4,7 @@ import { getMeta, listOps, setClock, updateOps, type OutboxRow, type OpStatus } 
 
 export type SyncSummary = { pending: number; failed: number; conflict: number; blocked: number; synced: number; error?: string };
 
-type ServerResult = { op_id: string; status: string; error?: string; result?: Record<string, unknown> };
+type ServerResult = { op_id: string; status: string; error?: string; result?: Record<string, unknown>; blocked_by?: string | null };
 
 function label(): string {
   const ua = navigator.userAgent;
@@ -29,7 +29,8 @@ async function sendBatch(outletId: string, rows: OutboxRow[]): Promise<void> {
       op_id: r.op_id,
       status: (r.status === "applied" ? "synced" : r.status) as OpStatus,
       error: r.error,
-      result: r.result,
+      // A blocked op remembers which earlier op holds it, so the sender can withdraw that one.
+      result: r.status === "blocked" ? { blocked_by: r.blocked_by ?? null } : r.result,
     })),
   );
 }
@@ -42,7 +43,7 @@ export function syncNow(userId: string): Promise<SyncSummary> {
     let error: string | undefined;
     const work = async () => {
       if (!navigator.onLine) return;
-      const todo = (await listOps()).filter((r) => r.user_id === userId && (r.status === "pending" || r.status === "blocked"));
+      const todo = (await listOps(userId)).filter((r) => r.status === "pending" || r.status === "blocked");
       const byOutlet = new Map<string, OutboxRow[]>();
       todo.forEach((r) => byOutlet.set(r.outlet_id, [...(byOutlet.get(r.outlet_id) ?? []), r]));
       for (const [outlet, rows] of byOutlet) {
@@ -55,7 +56,7 @@ export function syncNow(userId: string): Promise<SyncSummary> {
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
-    const all = (await listOps()).filter((r) => r.user_id === userId);
+    const all = await listOps(userId);
     const count = (s: OpStatus) => all.filter((r) => r.status === s).length;
     return { pending: count("pending"), failed: count("failed"), conflict: count("conflict"), blocked: count("blocked"), synced: count("synced"), error };
   })().finally(() => {

@@ -61,3 +61,13 @@ export function cashModel(i: CashInput) {
     AF: Math.min(i.CC, i.RF), FS: Math.max(0, i.RF - i.CC), TH: Math.max(0, i.CC - i.RF),
   };
 }
+
+export type FoodPayment = { id: string; amount: number; reverses_payment_id: string | null };
+
+/** Net paid on a food entry and the payments not yet reversed (a reversal row points at its original). */
+export function foodPaid(payments: FoodPayment[]): { paid: number; activeIds: string[] } {
+  const reversed = new Set(payments.map((p) => p.reverses_payment_id).filter(Boolean));
+  const originals = payments.filter((p) => !p.reverses_payment_id);
+  const active = originals.filter((p) => !reversed.has(p.id));
+  return { paid: active.reduce((a, p) => a + p.amount, 0), activeIds: active.map((p) => p.id) };
+}

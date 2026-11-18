@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commissionPool, allocateCommission, cashModel, type CashInput } from "@/lib/accounting";
+import { commissionPool, allocateCommission, cashModel, foodPaid, type CashInput } from "@/lib/accounting";
 import { rupees, signedRupees, parseRupees } from "@/lib/money";
 
 const R = (r: number) => r * 100; // rupees → paise
@@ -99,5 +99,17 @@ describe("cash model (§5.3)", () => {
 
   it("product sales are excluded from commission", () => {
     expect(cashModel({ ...base, P: R(50000) }).C).toBe(cashModel(base).C);
+  });
+});
+
+describe("foodPaid", () => {
+  it("nets reversals and lists only unreversed payments", () => {
+    expect(foodPaid([])).toEqual({ paid: 0, activeIds: [] });
+    const p = [
+      { id: "a", amount: R(200), reverses_payment_id: null },
+      { id: "b", amount: R(100), reverses_payment_id: null },
+      { id: "r", amount: R(200), reverses_payment_id: "a" },
+    ];
+    expect(foodPaid(p)).toEqual({ paid: R(100), activeIds: ["b"] });
   });
 });

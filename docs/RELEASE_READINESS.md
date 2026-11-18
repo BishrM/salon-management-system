@@ -298,3 +298,67 @@ To re-run pgTAP on staging yourself:
 4. Production Supabase (paid plan for backups) and Vercel projects — need explicit approval; never
    reuse staging keys.
 5. Optional: re-run `supabase test db` against staging with the DB password (above).
+
+## 14. Food removal, stuck sync queue and account switching (2026-11-19)
+Reported on staging: head and counter could remove expenses, zakat and products but not food that had
+been "paid now from the drawer"; afterwards the Register showed failed and blocked changes and sign-out
+was refused, trapping the user in the account.
+
+**Root causes**
+- **D4 (food removal):** the Register sent a plain `void_entry`; the deferred check `check_food_paid`
+  refuses to void food whose payments are not reversed ("reverse the food payments before voiding…").
+  The app had no single action that reverses and voids, and two separate client ops could leave a
+  reversal applied with the void refused.
+- **D5 (stuck queue):** `sync_ops` holds back every later op on a record while an earlier op from the same
+  device on that record is failed and unresolved (correct, to keep the intended order). Only
+  `sync.manage` holders (owner/manager) could resolve it, the device that sent it could not, and "Clear
+  from this device" removed the local copy while the server failure stayed open — so the device kept
+  retrying blocked ops forever and the sign-out guard never released.
+- **D6 (isolation gap found in passing):** the outbox API returned every user's rows; callers filtered,
+  but "Save pending entries" exported other users' queued ops on a shared device.
+
+**Fix (migration `20261118001300_food_void_and_withdraw.sql` + client):**
+- `void_entry` with `data.reverse_payments = true` reverses every unreversed payment of the food (same
+  reason, audited, dated by receipt time — D-14) and voids it, inside the op's own subtransaction: all
+  or nothing; reversal ids derive from the op id, so replays never add a second reversal. A plain void of
+  paid food is refused with "this food has ₹X already paid; use "Remove and cancel payment" … (nothing was
+  changed)". The Register shows "Remove + cancel payment" with an explicit confirmation, and stops
+  lowering a paid food cost below what was paid.
+- Blocked results name the op they wait for (`blocked_by`). `withdraw_sync_op(op_id, reason)`: only the
+  sender of a **failed** op (not a conflict) may withdraw it; it stays stored as failed, resolved by the
+  sender with the reason, and audited. The Register offers "Withdraw this change" (and "Withdraw the
+  earlier failed change" on a blocked item whose blocker is no longer on the device); waiting ops then
+  replay through normal validation. Managers keep `resolve_sync_issue`.
+- Late entries (frozen day) show "management decides" instead of buttons the server always refuses.
+- Sign-out: fully synced → signs out; pending → warning; failed/blocked → type KEEP; only when
+  `navigator.storage.persisted()` is true, otherwise blocked with the reason and the alternatives
+  (sync/resolve, or "Save pending entries" for the manager). Cache clearing on sign-out is unchanged. The
+  outbox API is user-scoped (list, export, clear), so another login never sees, sends, exports or clears
+  the ops; they sync when their owner signs in again.
+
+**Tests:** pgTAP `09_food_void_queue_test.sql` (31): unpaid food voids; paid food refused with no
+mutation; blocked + `blocked_by`; withdraw only by sender (not head, not manager), needs a reason,
+retry-safe, audited, op kept as failed; remove-and-cancel applies once, net paid 0, reversal mirrors the
+payment with reason and user; replay is a duplicate with no second reversal; stale version and non-food
+flag change nothing; conflicts not withdrawable. Allow-list test updated. Vitest (+7): blocked ops keep
+`blocked_by`; retry after resolution re-sends only the blocked op, in order; seq order; another account
+cannot read/send/export/clear; pending and failed ops survive another account's session and sync for
+their owner; sign-out decisions; durability detection.
+
+| Check | Result |
+|---|---|
+| `npm run lint` / `npx tsc --noEmit` | exit 0 / exit 0 |
+| `npx vitest run` | 4 files, **63/63** |
+| `supabase test db` (local stack, migrations 12–13 via `migration up`) | 9 files, **365/365** |
+| `scripts/test-db-local.sh` (fresh PostgreSQL 17, 13 migrations) | **365/365** |
+| `scripts/test-concurrency.sh` (fresh) | **11/11** |
+| `npm run build` | exit 0 |
+| Local app (counter/head test logins): paid lunch → 2 old-style removes → failed + blocked → withdraw ×2 → "Remove + cancel payment" | voided, 1 reversal, net paid ₹0, both withdrawals kept |
+| Local app: counter keeps 1 pending entry and signs out → head signs in (online) → counter signs back in | head saw 0 / server got nothing; entry synced on counter's sign-in, `recorded_by` = counter |
+| Local app: sign-out with problems when storage not persisted | blocked with the reason |
+| Staging | migration 13 applied with `db push --remote`; privileges: `withdraw_sync_op` authenticated only, `app.op_void_entry` no client access |
+
+**Limitations:** raw IndexedDB is readable with developer tools on the same browser profile (use one
+profile per person on shared tablets); real-tablet behaviour (T7, T11, T20, T21) is still untested;
+ops already blocked on a device before this release recover through "Withdraw" (or a manager) — they
+are never auto-skipped.

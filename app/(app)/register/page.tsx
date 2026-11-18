@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/session";
 import { Page, Notice } from "@/components/ui";
 import { Register, type RegisterEntry } from "./register";
 import { LiveRefresh } from "@/components/live-refresh";
+import { foodPaid, type FoodPayment } from "@/lib/accounting";
 
 export const metadata: Metadata = { title: "Register" };
 
@@ -23,7 +24,7 @@ export default async function RegisterPage() {
     supabase.from("entries")
       .select("id, kind, amount, staff_id, product_name, quantity, unit_price, payment_method, description, meal, expense_source, status, version, received_at, late, timestamp_flags, business_date")
       .eq("outlet_id", outlet.id).or(`business_date.eq.${today},business_date.is.null`).order("server_seq", { ascending: false }).limit(300),
-    supabase.from("entries").select("id, amount, meal, business_date, food_payments(amount, reverses_payment_id)")
+    supabase.from("entries").select("id, amount, meal, business_date, food_payments(id, amount, reverses_payment_id)")
       .eq("outlet_id", outlet.id).eq("kind", "food").eq("status", "active").gte("business_date", addDays(today, -7)),
     supabase.from("outlets").select("clock_warn_s").eq("id", outlet.id).single(),
   ]);
@@ -33,12 +34,9 @@ export default async function RegisterPage() {
     const s = a.staff as unknown as { id: string; full_name: string; active: boolean } | null;
     if (s?.active) staffMap.set(s.id, { id: s.id, name: s.full_name, temporary: a.is_temporary });
   }
+  const paidByFood = Object.fromEntries((food ?? []).map((f) => [f.id, foodPaid(f.food_payments as FoodPayment[])]));
   const unpaidFood = (food ?? [])
-    .map((f) => {
-      const paid = (f.food_payments as { amount: number; reverses_payment_id: string | null }[]).reduce(
-        (a, p) => a + (p.reverses_payment_id ? -p.amount : p.amount), 0);
-      return { id: f.id, meal: f.meal as string, date: f.business_date as string, cost: f.amount, unpaid: f.amount - paid };
-    })
+    .map((f) => ({ id: f.id, meal: f.meal as string, date: f.business_date as string, cost: f.amount, unpaid: f.amount - paidByFood[f.id].paid }))
     .filter((f) => f.unpaid > 0);
 
   return (
@@ -53,6 +51,7 @@ export default async function RegisterPage() {
       products={(products ?? []).map((p) => ({ id: p.id, name: p.name, price: p.default_price }))}
       entries={(entries ?? []) as RegisterEntry[]}
       unpaidFood={unpaidFood}
+      paidByFood={paidByFood}
     />
     </>
   );

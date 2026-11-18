@@ -44,6 +44,12 @@ Concurrency script: device lock, duplicate ops, initial float, handover overshoo
    any owner (cross-outlet names leak), found in staging S12. Migration `…001200` restricts them to
    `audit.read` holders of an outlet the row belongs to; pgTAP 334/334; applied to staging and
    re-checked there. Immutability re-probed on staging: 36/36 UPDATE/DELETE attempts refused.
+   **2026-11-19 (D4/D5):** the device outbox API is now user-scoped (list/export/clear), so "Save pending
+   entries" no longer exports other users' queued ops on a shared device. Sign-out may keep unsent ops only
+   when persistent storage is granted; they stay invisible and unsendable for other logins. Raw IndexedDB
+   is still readable by anyone with developer tools on that browser profile — use one OS/browser profile
+   per person on shared tablets for confidentiality. `withdraw_sync_op` is limited to the op's own sender
+   and to failed (not conflict) ops; it never deletes or applies anything.
 2. **Dev-only dependency advisory**: `picomatch` ReDoS (GHSA-fc5q-39xc-vjpf) via vitest/eslint
    tooling. Not shipped to production; npm's only fix is a vitest downgrade, which was not applied.
    Production dependencies: 0 known vulnerabilities.

@@ -33,7 +33,7 @@ select set_eq(
   array['my_permissions','server_time','current_business_date','set_outlet_cutoff','set_outlet_denominations',
         'set_offline_thresholds','set_outlet_details','create_staff','assign_staff','assign_staff_temporary',
         'end_staff_assignment','update_staff','upsert_product','add_membership','grant_acting_head',
-        'revoke_membership','sync_ops','resolve_sync_issue','assign_business_date','day_summary',
+        'revoke_membership','sync_ops','resolve_sync_issue','withdraw_sync_op','assign_business_date','day_summary',
         'prepare_closing','update_draft','allocate_food_excess','submit_closing','approve_closing',
         'reject_closing','reopen_closing','acknowledge_review','review_late_entry','establish_initial_float',
         'record_top_up','change_required_float','reverse_float_movement','record_handover',

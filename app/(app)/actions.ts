@@ -274,6 +274,12 @@ export async function assignBusinessDate(fd: FormData) {
     "assign_business_date", (v) => ({ p_kind: v.kind, p_id: v.id, p_date: v.date, p_reason: v.reason }), "Date assigned.");
 }
 
+/** The sender withdraws their own failed op (recorded, never deleted); ops waiting behind it then replay. */
+export async function withdrawSyncOp(fd: FormData) {
+  return rpcAction(z.object({ op: uuid, reason }), obj(fd), "withdraw_sync_op",
+    (v) => ({ p_op_id: v.op, p_note: v.reason }), "Withdrawn. Changes waiting behind it will be sent again.");
+}
+
 export async function resolveSyncIssue(fd: FormData) {
   return rpcAction(z.object({ id: z.coerce.number().int().positive(), reason }), obj(fd), "resolve_sync_issue",
     (v) => ({ p_sync_op: v.id, p_note: v.reason }), "Resolved.");

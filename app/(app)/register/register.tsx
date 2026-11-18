@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { enqueue, listOps, removeOps, exportPending, getMeta, type OutboxRow } from "@/lib/offline/outbox";
+import { withdrawSyncOp } from "@/app/(app)/actions";
 import { commissionPool } from "@/lib/accounting";
 import { rupees, parseRupees } from "@/lib/money";
 import { KIND, FLAGS } from "@/lib/labels";
@@ -20,8 +21,9 @@ type Tab = "service" | "product" | "expense" | "zakat" | "food";
 export function Register(props: {
   outletId: string; userId: string; today: string; clockWarnMs: number;
   staff: Staff[]; products: Product[]; entries: RegisterEntry[]; unpaidFood: UnpaidFood[];
+  paidByFood: Record<string, { paid: number; activeIds: string[] }>;
 }) {
-  const { outletId, userId, staff, products, entries, unpaidFood } = props;
+  const { outletId, userId, staff, products, entries, unpaidFood, paidByFood } = props;
   const [tab, setTab] = useState<Tab>("service");
   const [outbox, setOutbox] = useState<OutboxRow[]>([]);
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
@@ -30,8 +32,8 @@ export function Register(props: {
   const staffName = useMemo(() => new Map(staff.map((s) => [s.id, s.name])), [staff]);
 
   const refresh = useCallback(async () => {
-    const rows = await listOps().catch(() => []);
-    const mine = rows.filter((r) => r.outlet_id === outletId && r.user_id === userId);
+    const rows = await listOps(userId).catch(() => []);
+    const mine = rows.filter((r) => r.outlet_id === outletId);
     setOutbox(mine);
     setStale(mine.some((r) => r.status === "pending" && Date.now() - Date.parse(r.created_at) > 10 * 60_000));
     const m = await getMeta().catch(() => null);
@@ -60,6 +62,22 @@ export function Register(props: {
     setFlash({ ok: true, text });
     setTimeout(() => setFlash(null), 3000);
   };
+
+  // Withdraw a failed op on the server (kept there as resolved by this user, never deleted), then drop the
+  // device copy; ops waiting behind it are retried by the next sync and go through normal validation.
+  async function withdraw(opId: string, localRow?: string) {
+    const why = window.prompt("Why withdraw this change? (it stays in the history for the manager)");
+    if (!why?.trim()) return setFlash({ ok: false, text: "A reason is required." });
+    const fd = new FormData();
+    fd.set("op", opId);
+    fd.set("reason", why.trim());
+    const r = await withdrawSyncOp(fd).catch(() => ({ ok: false as const, error: "Could not reach the server. Try again when online." }));
+    if (!r.ok) return setFlash({ ok: false, text: r.error });
+    if (localRow) await removeOps(userId, [localRow]);
+    window.dispatchEvent(new Event("salonops:queued"));
+    await refresh();
+    saved(r.message ?? "Withdrawn.");
+  }
 
   // Server entries plus local creates not yet visible in the server props (pending, or synced but
   // the page has not refreshed yet — LiveRefresh catches up), so totals never drop between the two.
@@ -169,23 +187,34 @@ export function Register(props: {
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="num font-semibold">{rupees(e.amount)}</span>
-                    {e.status === "active" && e.kind !== "product" && (
+                    {/* Late entries belong to a submitted/approved day: the server refuses changes until management
+                        reopens it (they decide include/exclude on the closing), so offer no buttons that can only fail. */}
+                    {e.late && e.status === "active" && <span className="text-xs text-slate-500">management decides</span>}
+                    {e.status === "active" && !e.late && e.kind !== "product" && (
                       <button className="rounded px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50" onClick={async () => {
                         const v = window.prompt("Correct amount (₹):", String(e.amount / 100));
                         if (v == null) return;
                         const amt = parseRupees(v);
                         if (!amt) return setFlash({ ok: false, text: "Enter a whole rupee amount." });
+                        const paid = paidByFood[e.id]?.paid ?? 0;
+                        // The server refuses a food cost below what was already paid; say so here instead of creating a sync problem.
+                        if (e.kind === "food" && amt < paid) return setFlash({ ok: false, text: `${rupees(paid)} was already paid for this food. Remove it and enter it again instead.` });
                         const why = window.prompt("Reason for the correction:");
                         if (!why?.trim()) return setFlash({ ok: false, text: "A reason is required." });
                         if (await queue("correct_entry", e.id, { amount: amt }, { base_version: e.version, reason: why.trim() })) saved("Correction saved.");
                       }}>Correct</button>
                     )}
-                    {e.status === "active" && (
+                    {e.status === "active" && !e.late && (
                       <button className="rounded px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50" onClick={async () => {
                         const why = window.prompt("Why remove this entry? (it stays in history)");
                         if (!why?.trim()) return;
-                        if (await queue("void_entry", e.id, {}, { base_version: e.version, reason: why.trim() })) saved("Entry removed.");
-                      }}>Remove</button>
+                        // A paid food entry can only be voided once its payments are reversed (server rule). One op
+                        // does both on the server, all or nothing, so the money goes back to where it was paid from.
+                        const paid = paidByFood[e.id]?.paid ?? 0;
+                        if (paid && !window.confirm(`This food was paid (${rupees(paid)}). Removing it also cancels that payment: the money counts as returned to where it was paid from. Continue?`)) return;
+                        if (await queue("void_entry", e.id, paid ? { reverse_payments: true } : {}, { base_version: e.version, reason: why.trim() }))
+                          saved(paid ? "Food removed and its payment cancelled." : "Entry removed.");
+                      }}>{(paidByFood[e.id]?.paid ?? 0) > 0 ? "Remove + cancel payment" : "Remove"}</button>
                     )}
                   </span>
                 </li>
@@ -222,19 +251,39 @@ export function Register(props: {
                   <li key={r.op_id} className="rounded-lg bg-rose-50 p-2 text-sm text-rose-900">
                     <div className="font-medium">{describe(r.op.data, staffName) || r.op.type.replace("_", " ")} · {rupees(amountOf(r.op.data))}</div>
                     <div>{r.error ?? r.status}</div>
-                    {r.status !== "blocked" && (
-                      <button className="mt-1 text-xs font-semibold underline" onClick={async () => {
-                        if (!window.confirm("The server has kept a copy for the manager. Remove it from this device?")) return;
-                        await removeOps([r.op_id]);
-                        refresh();
-                      }}>Clear from this device</button>
+                    {r.status === "failed" && (
+                      <button className="mt-1 text-xs font-semibold underline" onClick={() => withdraw(r.op_id, r.op_id)}>
+                        Withdraw this change
+                      </button>
                     )}
+                    {r.status === "conflict" && (
+                      <>
+                        <div className="mt-1 text-xs">The server kept a copy for the manager; later changes to this entry wait until they resolve it.</div>
+                        <button className="mt-1 text-xs font-semibold underline" onClick={async () => {
+                          if (!window.confirm("The server has kept a copy for the manager. Remove it from this device?")) return;
+                          await removeOps(userId, [r.op_id]);
+                          refresh();
+                        }}>Clear from this device</button>
+                      </>
+                    )}
+                    {r.status === "blocked" && (() => {
+                      const by = (r.result as { blocked_by?: string | null } | undefined)?.blocked_by;
+                      const local = by ? outbox.find((x) => x.op_id === by) : undefined;
+                      if (local) return <div className="mt-1 text-xs">Waits for the failed change above. Withdraw that one (or a manager resolves it) and this is sent again.</div>;
+                      if (by) return (
+                        <>
+                          <div className="mt-1 text-xs">Waits for an earlier change from this device that failed on the server.</div>
+                          <button className="mt-1 text-xs font-semibold underline" onClick={() => withdraw(by)}>Withdraw the earlier failed change</button>
+                        </>
+                      );
+                      return <div className="mt-1 text-xs">Waits for the entry it changes to reach the server. Keep this device online; if it never arrives, tell the manager.</div>;
+                    })()}
                   </li>
                 ))}
               </ul>
             )}
             <button className={`${btnSecondary} mt-3 w-full`} onClick={async () => {
-              const blob = new Blob([await exportPending()], { type: "application/json" });
+              const blob = new Blob([await exportPending(userId)], { type: "application/json" });
               const a = document.createElement("a");
               a.href = URL.createObjectURL(blob);
               a.download = `salonops-pending-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
