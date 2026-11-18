@@ -10,7 +10,7 @@ cp .env.example .env.local   # paste the API URL, publishable/anon key and servi
 npm run dev               # http://localhost:3000
 ```
 
-Seed logins (local/staging only): `owner@salonops.test` / `owner-Pass-1`, likewise `manager`, `head`,
+Seed logins (**local only** — never seed a hosted project, its passwords are predictable; see `docs/STAGING_SETUP.md`): `owner@salonops.test` / `owner-Pass-1`, likewise `manager`, `head`,
 `counter`, `outsider` (owner of a second outlet, for isolation checks). The seed sets the cutoff to 04:00
 and creates demo staff and products; the **initial float is not seeded** — sign in as owner and use
 Admin → Cash float, as in production.
@@ -38,6 +38,7 @@ add a new one):
 | `…000800_register_engine` | business dates, timestamp classification, register ops, `sync_ops` |
 | `…000900_closing_engine` | accounting, lifecycle, approval ordering, float, handovers, Paytm import |
 | `…001000_security_and_grants` | RLS for new tables, RPC allow-list, Realtime |
+| `…001100_paytm_import_changes` | Paytm re-import reports rows whose amount/status changed (never overwrites) |
 
 ```bash
 supabase db reset          # local: rebuild from migrations + seed

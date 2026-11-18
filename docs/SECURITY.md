@@ -31,12 +31,13 @@ expired, future, revoked, demoted grantor, self-grant, NULL end), immutability t
 Concurrency script: device lock, duplicate ops, initial float, handover overshoot.
 
 ## Known issues / not yet verified
-1. **Verified locally only.** On 2026-11-18 the migrations applied and `supabase test db` passed
-   (328/328) on the local Supabase stack. A manual walkthrough covered sign-in for owner, manager, head
-   and counter, the initial float, register entries (with live refresh), a void, closing, food-excess
-   approval, submit and approve, reports, the Excel export and the audit log. Direct API probes
-   confirmed that anon, counter and the other-outlet owner are denied. Not yet exercised: offline use
-   on a real tablet, multi-day reopen/resubmit in the UI, and a hosted staging project.
+1. **Verified locally only.** See `docs/RELEASE_READINESS.md` (2026-11-18 audit): 11 migrations apply
+   on a fresh Supabase Postgres 17.12 + Auth schema and on the running local stack; `supabase test db`
+   passes (330/330) on both; the two-session concurrency script passes (11/11). Browser walkthroughs
+   covered all four roles, the register, closing, revision 2 (reopen → correct → resubmit → approve),
+   Paytm CSV import and login creation. 36 direct API probes (anon, counter, head, manager, other-outlet
+   owner) were all denied, and Realtime delivered HUDCO entry events to the owner but not to the other
+   outlet's owner. Not yet exercised: offline use on a real tablet and a hosted staging project.
 2. **Dev-only dependency advisory**: `picomatch` ReDoS (GHSA-fc5q-39xc-vjpf) via vitest/eslint
    tooling. Not shipped to production; npm's only fix is a vitest downgrade, which was not applied.
    Production dependencies: 0 known vulnerabilities.

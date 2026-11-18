@@ -1,0 +1,146 @@
+# SalonOps — Hosted staging setup (not yet performed)
+
+Status: **documentation only.** No hosted Supabase project or Vercel project has been created. Every
+step below that creates an account, a project or a deployment needs the owner's approval first.
+Staging holds **test data only** — never real salon takings, never real staff phone numbers.
+
+Prerequisite decisions (see `RELEASE_READINESS.md` §11): approval to push `salonops-v1` to GitHub
+(Vercel deploys from Git). Commit metadata already uses the GitHub noreply address.
+
+---
+
+## 1. Supabase (staging project)
+
+### 1.1 Project
+| Setting | Value | Why |
+|---|---|---|
+| Plan | Free is enough for staging | No real data; production needs a paid plan for backups (§1.7) |
+| Region | `ap-south-1` (Mumbai) | Same region as Vercel `bom1`; Indian users |
+| Postgres version | 17 (the local stack runs `supabase/postgres:17.12.0.000`) | Migrations were verified on 17.12 |
+| Project name | `salonops-staging` | Keep staging and production separate projects |
+| Database password | generated, stored in a password manager | Needed only for `supabase link` / `db push` |
+
+### 1.2 Database migrations
+Apply the 11 files in `supabase/migrations/` in filename order, once, with the CLI:
+```bash
+supabase link --project-ref <staging-ref>
+supabase db push            # applies migrations only; it does NOT run seed.sql
+```
+- Migrations are one-shot (they `create` objects; re-running one fails on purpose). The CLI's
+  migration history table prevents double application. Never edit an applied migration — add one.
+- Verified 2026-11-18 on a fresh Supabase Postgres 17.12 with the Auth schema applied: all 11 apply,
+  the resulting schema is identical to the local stack (same tables, policies, triggers and function
+  hash), and the pgTAP suite passes (330/330).
+- Optional verification against staging (needs the database URL; runs inside transactions that roll back):
+  `supabase test db --remote=<staging db url>` — the CLI asks for confirmation.
+
+### 1.3 Extensions
+| Extension | Created by | Notes |
+|---|---|---|
+| `btree_gist` | migration `…000100` (`create extension if not exists … with schema extensions`) | staff assignment overlap constraint |
+| `pgcrypto` | preinstalled on Supabase | used only by `seed.sql` (local) |
+| `pgtap` | `supabase test db` (tests only) | not needed at runtime |
+No other database configuration is required: Realtime publication membership (`entries`,
+`closing_events`), RLS, grants and the RPC allow-list are all inside the migrations.
+
+### 1.4 Auth (Dashboard → Authentication)
+| Setting | Value |
+|---|---|
+| Providers | **Email** only (password sign-in). Disable all OAuth providers. |
+| Allow new users to sign up | **Off** (owner creates logins in Admin → Users; `config.toml` has `enable_signup = false` locally) |
+| Confirm email | Off is acceptable (logins are created with `email_confirm: true` by the server action; no SMTP is configured) |
+| Minimum password length | 8 (app also requires a letter and a digit) |
+| Site URL | the staging Vercel URL, e.g. `https://salonops-staging.vercel.app` |
+| Redirect URLs | `https://salonops-staging.vercel.app/**` and, if previews are used, `https://*-<team-slug>.vercel.app/**` |
+| JWT expiry | 3600 s (default; matches local) |
+| Refresh token rotation | On (default) |
+The app uses only `signInWithPassword` and `signOut`; it has no magic-link, OAuth or password-reset
+callback route, so redirect URLs matter only if those are enabled later.
+
+### 1.5 RLS requirements (already enforced by migrations — verify, do not change)
+- Every table in `public` has RLS enabled (21 tables); `anon` has no table or function privileges.
+- `authenticated` has `SELECT` only; all writes go through 37 `SECURITY DEFINER` RPCs with
+  `search_path = ''`, each checking a permission in the target outlet.
+- After `db push`, run in the SQL editor and expect zero rows:
+  ```sql
+  select relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity;
+  select table_name, privilege_type from information_schema.role_table_grants
+   where table_schema = 'public' and grantee in ('anon','authenticated') and privilege_type <> 'SELECT';
+  ```
+- Do not expose the `app` schema in API settings (Exposed schemas = `public`, `graphql_public`).
+
+### 1.6 Bootstrap and test accounts
+**Never run `supabase/seed.sql` on a hosted project**: its passwords follow a published pattern and the
+staging URL is reachable from the internet.
+1. Dashboard → Authentication → Add user: `owner+staging@<a domain you control>`, strong unique
+   password, "Auto confirm". Copy the user id.
+2. SQL editor (runs as `postgres`):
+   ```sql
+   select app.bootstrap_outlet('HUDCO Big Boss (STAGING)', 'Test address', '<owner user id>');
+   ```
+3. Sign in to staging as that owner → Admin → Setup checklist: cutoff (04:00 suggested, B1),
+   denominations, test employees (invented names), catalogue, then Admin → Users → Create login for
+   test `manager`, `head`, `counter` accounts (each with its own strong password), then the initial float.
+4. For isolation checks, bootstrap a second outlet with a second owner.
+5. Record test credentials in the team password manager, not in the repository.
+
+### 1.7 Backup and recovery
+| Environment | Requirement |
+|---|---|
+| Staging | None required (test data; re-creatable from migrations + §1.6). Free plan has no downloadable backups. |
+| Production | **Paid plan required** for daily backups (Pro); PITR optional add-on. Needs owner approval (cost). |
+| Both | Reports → Download Excel monthly as an offline copy. Financial tables are insert-only/versioned with an audit log, so history is reconstructible from the database itself. |
+| Devices | IndexedDB is not a backup; use Register → "Save pending entries" + Admin → Recover for a stuck tablet. |
+Recovery drill to run once on staging before production: export a month to Excel, create a fresh
+project, `db push`, bootstrap, and confirm the app works (a full data restore needs a paid-plan backup).
+
+---
+
+## 2. Vercel (staging)
+
+| Setting | Value |
+|---|---|
+| Framework preset | Next.js (auto-detected; Next 16.4.6, React 19.1) |
+| Root directory | repository root (`./`) — `package.json`, `next.config.ts` and `vercel.json` live there |
+| Install command | `npm ci` (default with `package-lock.json`) |
+| Build command | `npm run build` (= `next build --turbopack`) |
+| Output | default (`.next`) |
+| Node.js version | 22.x or 24.x (Next requires ≥ 20.9; CI and local use 24) |
+| Region | `bom1` (from `vercel.json`) |
+| Production branch | for staging, a dedicated `staging` branch or the `salonops-v1` branch — `main` should stay production |
+
+### 2.1 Environment variables
+| Variable | Class | Staging value | Production value | Scope in Vercel |
+|---|---|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | **Public / client-side** | staging project URL | production project URL | Preview + Production |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Public / client-side** (publishable or legacy anon key; safe because RLS protects data) | staging key | production key | Preview + Production |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Server-only secret** — mark *Sensitive*; never `NEXT_PUBLIC_` | staging service-role key | production service-role key | Preview + Production (server) |
+| `NODE_ENV` | set by the platform | — | — | — |
+| `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` | **Development/test-only** (local pgTAP and concurrency scripts) | not set | not set | never in Vercel |
+| `.env.local` values from `supabase status` | **Development/test-only** (local stack keys) | never copy to Vercel | — | — |
+- The service-role key is read only in `lib/supabase/server.ts` (`import "server-only"`) by the owner's
+  Create login action, after a `users.manage` check. CI fails the build if `service_role` or
+  `SUPABASE_SERVICE_ROLE_KEY` appears in `.next/static`.
+- Use **different** Supabase projects (and keys) for Preview and Production; Preview deployments must
+  never point at production data.
+
+### 2.2 Preview deployments
+- Every pull request gets a preview URL; set Preview env vars to the **staging** project.
+- Enable **Deployment Protection → Vercel Authentication** for Preview deployments so only team
+  members can open them (available on all plans for previews — check the current plan terms before
+  relying on it; do not buy anything without approval).
+- Add the preview URL pattern to Supabase redirect URLs (§1.4) only if auth redirects are added later.
+
+### 2.3 Authentication redirects
+- Sign-in is a password form posting to Supabase; the session is an HTTP-only cookie set by
+  `@supabase/ssr`. `proxy.ts` refreshes it and sends signed-out users to `/login`.
+- No OAuth/magic link → no callback route. If email reset is added later, add
+  `https://<staging-domain>/auth/callback` to Supabase redirect URLs.
+
+### 2.4 After the first deploy (smoke test)
+1. Open `/login` over HTTPS; sign in as each test role; confirm the counter is denied Admin/Reports.
+2. Response headers on `/`: `X-Frame-Options: DENY`, `Strict-Transport-Security`, CSP `frame-ancestors 'none'`.
+3. `curl https://<staging>/_next/static/...` bundle grep for `service_role` → nothing.
+4. Register an entry on one browser and see it appear live on a second (Realtime).
+5. Run `docs/TABLET_TEST_PLAN.md` and `docs/ACCOUNTING_ACCEPTANCE_TESTS.md` on staging.
