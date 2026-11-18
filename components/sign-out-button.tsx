@@ -11,7 +11,8 @@ export function SignOutButton({ userId }: { userId: string }) {
       disabled={pending}
       className="min-h-9 rounded-md px-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
       onClick={async () => {
-        const waiting = (await listOps().catch(() => [])).filter((r) => r.user_id === userId && r.status === "pending").length;
+        // "blocked" ops are not stored on the server either; only this device holds them.
+        const waiting = (await listOps().catch(() => [])).filter((r) => r.user_id === userId && (r.status === "pending" || r.status === "blocked")).length;
         if (waiting) {
           window.alert(`${waiting} entr${waiting === 1 ? "y has" : "ies have"} not reached the server yet. Connect to the internet and wait for "Synced" before signing out.`);
           return;

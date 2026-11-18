@@ -2,7 +2,7 @@ begin;
 \ir helpers.psql
 select tests.ops_fixture();
 
-select plan(69);
+select plan(71);
 
 create temp table k (name text primary key, v uuid);
 grant select, insert, update on k to authenticated;
@@ -211,10 +211,17 @@ select tests.login_as('head');
 select is(public.import_paytm_transactions(tests.outlet('A'), '[
   {"txn_ref":"T1","txn_time":"2026-02-04 11:00+05:30","amount":30000,"status":"success","method":"upi"},
   {"txn_ref":"T2","txn_time":"2026-02-04 12:00+05:30","amount":20000,"status":"failed"}]', 'feb.csv') - 'batch',
-  '{"inserted":2,"duplicates":0}'::jsonb, 'transactions imported');
+  '{"inserted":2,"duplicates":0,"changed":0,"changed_refs":[]}'::jsonb, 'transactions imported');
 select is(public.import_paytm_transactions(tests.outlet('A'), '[
-  {"txn_ref":"T1","txn_time":"2026-02-04 11:00+05:30","amount":99999,"status":"success"}]', 'feb-again.csv') - 'batch',
-  '{"inserted":0,"duplicates":1}'::jsonb, 're-importing a reference is skipped, never overwritten');
+  {"txn_ref":"T1","txn_time":"2026-02-04 11:00+05:30","amount":30000,"status":"success","method":"upi"}]', 'feb-again.csv') - 'batch',
+  '{"inserted":0,"duplicates":1,"changed":0,"changed_refs":[]}'::jsonb, 're-importing an identical row is a duplicate');
+select is(public.import_paytm_transactions(tests.outlet('A'), '[
+  {"txn_ref":"T1","txn_time":"2026-02-04 11:00+05:30","amount":99999,"status":"success"},
+  {"txn_ref":"T2","txn_time":"2026-02-04 12:00+05:30","amount":20000,"status":"success"}]', 'feb-later.csv') - 'batch',
+  '{"inserted":0,"duplicates":0,"changed":2,"changed_refs":["T1","T2"]}'::jsonb,
+  'rows whose amount or status changed are reported, not silently skipped');
+select is((select array_agg(amount::text || status order by txn_ref) from public.paytm_transactions where outlet_id = tests.outlet('A')),
+  array['30000success','20000failed'], 'earlier imported rows are never overwritten');
 select ok((public.update_draft(pg_temp.k('c4'), 10000, null, null, '{"50000":1}', null, null) -> 'warnings') ? 'paytm_import_mismatch',
   'manual Paytm total that differs from imported successes is flagged');
 reset role;

@@ -298,8 +298,11 @@ export async function importPaytm(outlet: string, rows: unknown, sourceName: str
   });
   if (error) return { ok: false, error: friendlyError(error) };
   revalidatePath("/", "layout");
-  const d = data as { inserted: number; duplicates: number };
-  return { ok: true, message: `Imported ${d.inserted} transaction(s); skipped ${d.duplicates} already imported.` };
+  const d = data as { inserted: number; duplicates: number; changed?: number; changed_refs?: string[] };
+  const changed = d.changed
+    ? ` ${d.changed} transaction(s) differ from the earlier import and were NOT updated (${(d.changed_refs ?? []).join(", ")}${d.changed > 20 ? "…" : ""}); the comparison uses the earlier amount/status.`
+    : "";
+  return { ok: true, message: `Imported ${d.inserted} transaction(s); skipped ${d.duplicates} already imported.${changed}` };
 }
 
 /** Management recovery import of a "Save pending entries" file (§6.2 step 5): idempotent replay. */
