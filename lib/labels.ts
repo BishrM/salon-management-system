@@ -18,6 +18,7 @@ export const WARNINGS: Record<string, string> = {
   service_paytm_negative: "Paytm total is less than product Paytm sales.",
   service_paytm_exceeds_services: "Paytm for services is more than all service sales.",
   paytm_import_mismatch: "Paytm total differs from the imported Paytm transactions.",
+  paytm_recorded_mismatch: "Paytm total differs from the UPI / Paytm / Card sales recorded at the counter.",
 };
 
 export const ACKS: Record<string, string> = {
@@ -50,6 +51,15 @@ export const KIND: Record<string, string> = {
   zakat: "Zakat",
   food: "Food",
 };
+
+/** How a service or product sale was paid. UPI and card are settled through Paytm (one channel). */
+export const PAID_BY: Record<string, string> = { cash: "Cash", paytm: "UPI / Paytm / Card" };
+
+/**
+ * An entry corrected at least once. Only a correction or a void raises `version` (+1 each, a void at most
+ * once and last), so corrections = version − 1 − (voided ? 1 : 0). New and merely voided entries are not edited.
+ */
+export const isEdited = (e: { version: number; status: string }) => e.version - (e.status === "voided" ? 2 : 1) > 0;
 
 export const FLAGS: Record<string, string> = {
   clock_offset: "device clock off",

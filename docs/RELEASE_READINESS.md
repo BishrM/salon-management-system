@@ -362,3 +362,60 @@ their owner; sign-out decisions; durability detection.
 profile per person on shared tablets); real-tablet behaviour (T7, T11, T20, T21) is still untested;
 ops already blocked on a device before this release recover through "Withdraw" (or a manager) — they
 are never auto-skipped.
+
+## 15. Client features 4 and 5: service payment method, EDITED entries (2026-11-20)
+Not deployed. Committed on `salonops-v1` locally; staging needs `db push` of migration `…001500` plus a
+push of the branch, both awaiting the owner's approval.
+
+**Feature 4 — Cash / UPI / Paytm / Card on service sales (D-26).** Two buttons ("Cash", "UPI / Paytm /
+Card") sit directly under the service calculator; "Save sale" stays disabled ("Choose how it was paid")
+until one is chosen. The op carries `payment_method` through the IndexedDB outbox (same op id, device
+seq and device time on every retry). The server (`app.entry_values`) refuses a service sale or service
+correction without `cash`/`paytm`; refused ops create nothing. `day_summary` reports
+`service_cash_recorded`, `service_paytm_recorded`, `service_method_unrecorded` and
+`paytm_recorded_total`; the dashboard and closing page show them, and `paytm_recorded_mismatch` warns
+when recorded UPI/Paytm/Card ≠ the entered Paytm total. `compute_day`, revisions, the cash model,
+commission (10%, rounded down to ₹10) and Paytm reconciliation are unchanged.
+
+**Feature 5 — EDITED entries and owner audit (D-27).** Corrections are unchanged in-place updates with a
+required reason, audited by the existing `entries_audit` trigger. The Register and the Owner dashboard
+tag corrected entries **EDITED** (new and merely removed entries are not tagged); for owners the tag opens
+`/admin/audit?table=entries&row=…`, which now labels the action EDITED/VOIDED, shows original (struck
+through) → corrected values in rupees and payment-method words, who, when, the device time of the op
+(offline corrections) and the reason. The Register can now correct products (quantity, payment method)
+and the payment method of service sales.
+
+**Migration:** `20261120001500_service_payment_method.sql` — relaxes `entries_kind_columns` so service
+rows may carry `payment_method` (existing rows stay valid, no backfill), adds `app.payment_method`
+(no client access), replaces `app.entry_values`, `app.op_correct_entry` and `public.day_summary`
+(grants unchanged). Safe on existing staging data: no row is rewritten.
+
+**Tests:** new pgTAP `11_service_payment_and_edits_test.sql` (53): cash and UPI sales stored; missing or
+unknown method refused with nothing created; offline sale keeps method, device time and recorder;
+duplicate retries; outsider / non-member / other-outlet refused; recorded split and unchanged commission
+(also via `compute_day`); older sale without a method stays valid and a correction must state it;
+service, product and expense corrections are edited (new ones are not) with original and new values,
+outlet, editor, time, reason and op in the audit log; offline correction keeps device time; retry adds
+no correction and no audit event; stale version is a conflict; another outlet's owner cannot correct or
+read the audit; audit is owner-only (head, counter read nothing); mismatch warning on/off; a submitted
+day refuses corrections (SO423) with no change and no audit event. Existing service ops in tests 05, 08,
+09 and the concurrency script now send `payment_method` (the new requirement); no assertion was removed.
+Vitest (+4): method survives reload and a dropped request, sent once; correction keeps base version,
+reason and device time; EDITED rule; labels.
+
+| Check | Result |
+|---|---|
+| `npm run lint` / `npx tsc --noEmit` | exit 0 / exit 0 |
+| `npx vitest run` | 5 files, **67/67** |
+| `supabase test db` (local stack, migrations 14–15 via `migration up`) | 11 files, **434/434** |
+| `scripts/test-db-local.sh` (fresh PostgreSQL 17, 15 migrations) | **434/434** |
+| `scripts/test-concurrency.sh` (fresh) | **11/11** |
+| `npm run build` | exit 0 |
+| Local app, counter: ₹500 UPI sale; ₹300 Cash sale entered offline then synced; save disabled until a method is chosen | stored `paytm` / `cash`, one sync op each |
+| Local app, counter: correct ₹500 UPI → ₹600 Cash; product quantity 1 → 2 | version 2, EDITED in the Register |
+| Local app, owner: dashboard EDITED → audit history | ₹500 → ₹600, UPI / Paytm / Card → Cash, counter, times, reason |
+| Phone width (375 px) | buttons fit, no horizontal scroll |
+
+**Remaining:** apply to staging and repeat the walkthrough there; real tablets (T7, T11, T20, T21);
+service ops queued on a device before the release, without a method, fail with "choose how it was paid"
+and must be withdrawn and re-entered (none expected outside staging).

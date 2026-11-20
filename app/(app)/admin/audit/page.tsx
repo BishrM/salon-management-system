@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { requirePermission } from "@/lib/session";
 import { Page, Card, Table, fmtTime, input, btnSecondary } from "@/components/ui";
+import { rupees } from "@/lib/money";
+import { PAID_BY } from "@/lib/labels";
 
 export const metadata: Metadata = { title: "Audit history" };
 
@@ -16,6 +18,12 @@ export default async function Audit({ searchParams }: { searchParams: Promise<{ 
   if (row && /^[0-9a-f-]{36}$/i.test(row)) q = q.eq("row_id", row);
   const [{ data: logs }, { data: profiles }] = await Promise.all([q, supabase.from("profiles").select("id, full_name")]);
   const name = (id: string | null) => (id ? profiles?.find((p) => p.id === id)?.full_name ?? id.slice(0, 8) : "system");
+  // A register change made offline reaches the server later: show when it was made on the device too.
+  const opIds = [...new Set((logs ?? []).map((l) => l.op_id).filter(Boolean))];
+  const { data: ops } = opIds.length
+    ? await supabase.from("sync_ops").select("op_id, device_time").eq("outlet_id", outlet.id).in("op_id", opIds)
+    : { data: [] };
+  const madeAt = new Map((ops ?? []).map((o) => [o.op_id, o.device_time as string | null]));
 
   return (
     <Page title="Audit history">
@@ -31,7 +39,12 @@ export default async function Audit({ searchParams }: { searchParams: Promise<{ 
       </form>
       <Card>
         <Table head={["#", "When", "Who", "Record", "Action", "Reason", "Changes"]} rows={(logs ?? []).map((l) => [
-          l.server_seq, fmtTime(l.at), name(l.actor), `${l.table_name.replace(/_/g, " ")} ${l.row_id?.slice(0, 8) ?? ""}`, l.action, l.reason ?? "",
+          l.server_seq,
+          <span key="w">{fmtTime(l.at)}{madeAt.get(l.op_id) && <span className="block text-xs text-slate-500">made on device {fmtTime(madeAt.get(l.op_id))}</span>}</span>,
+          name(l.actor),
+          `${l.table_name === "entries" ? `${(l.new_data ?? l.old_data)?.kind ?? ""} entry` : l.table_name.replace(/_/g, " ")} ${l.row_id?.slice(0, 8) ?? ""}`,
+          l.table_name === "entries" && l.action === "UPDATE" ? (l.new_data?.status === "voided" && l.old_data?.status !== "voided" ? "VOIDED" : "EDITED") : l.action,
+          l.reason ?? "",
           <Diff key="d" oldData={l.old_data} newData={l.new_data} />,
         ])} empty="No audit records." />
       </Card>
@@ -39,13 +52,25 @@ export default async function Audit({ searchParams }: { searchParams: Promise<{ 
   );
 }
 
+const MONEY = new Set(["amount", "unit_price"]);
+const show = (k: string, v: unknown) =>
+  MONEY.has(k) && typeof v === "number" ? rupees(v)
+  : k === "payment_method" ? (v == null ? "not recorded" : PAID_BY[String(v)] ?? String(v))
+  : JSON.stringify(v);
+
+// Original (struck through) → corrected value, for every field that changed.
 function Diff({ oldData, newData }: { oldData: Record<string, unknown> | null; newData: Record<string, unknown> | null }) {
-  const skip = new Set(["updated_at", "created_at", "server_seq", "version"]);
-  if (!oldData) return <span className="text-xs text-slate-500">created</span>;
+  const skip = new Set(["updated_at", "updated_by", "created_at", "server_seq", "version"]);
+  if (!oldData) {
+    const amt = newData?.amount;
+    return <span className="text-xs text-slate-500">created{typeof amt === "number" ? ` · ${rupees(amt)}` : ""}</span>;
+  }
   const changed = Object.keys(newData ?? {}).filter((k) => !skip.has(k) && JSON.stringify(oldData[k]) !== JSON.stringify(newData?.[k]));
   return (
     <ul className="text-xs">
-      {changed.map((k) => <li key={k}><b>{k}</b>: {JSON.stringify(oldData[k])} → {JSON.stringify(newData?.[k])}</li>)}
+      {changed.map((k) => (
+        <li key={k}><b>{k.replace(/_/g, " ")}</b>: <s className="text-slate-500">{show(k, oldData[k])}</s> → <b>{show(k, newData?.[k])}</b></li>
+      ))}
     </ul>
   );
 }

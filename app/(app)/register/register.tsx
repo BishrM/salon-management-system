@@ -5,7 +5,7 @@ import { withdrawSyncOp, withdrawBlockedOp } from "@/app/(app)/actions";
 import { deviceLabel } from "@/lib/offline/sync";
 import { commissionPool } from "@/lib/accounting";
 import { rupees, parseRupees } from "@/lib/money";
-import { KIND, FLAGS } from "@/lib/labels";
+import { KIND, FLAGS, PAID_BY, isEdited } from "@/lib/labels";
 import { btnPrimary, btnSecondary, input, labelCls } from "@/components/ui";
 
 export type RegisterEntry = {
@@ -150,8 +150,9 @@ export function Register(props: {
             </div>
           )}
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            {tab === "service" && <ServiceForm staff={staff} onSave={async (sid, amt) => {
-              if (await queue("create_entry", crypto.randomUUID(), { kind: "service", staff_id: sid, amount: amt })) saved(`${rupees(amt)} saved for ${staffName.get(sid)}.`);
+            {tab === "service" && <ServiceForm staff={staff} onSave={async (sid, amt, method) => {
+              if (await queue("create_entry", crypto.randomUUID(), { kind: "service", staff_id: sid, amount: amt, payment_method: method }))
+                saved(`${rupees(amt)} (${PAID_BY[method]}) saved for ${staffName.get(sid)}.`);
             }} />}
             {tab === "product" && <ProductForm products={products} onSave={async (d) => {
               if (await queue("create_entry", crypto.randomUUID(), { kind: "product", ...d })) saved("Product sale saved.");
@@ -205,6 +206,7 @@ export function Register(props: {
                     {describe(e as unknown as Record<string, unknown>, staffName)}
                     {e.business_date == null && <span className="ml-1 rounded bg-amber-100 px-1 text-xs text-amber-900">undated</span>}
                     {e.late && <span className="ml-1 rounded bg-amber-100 px-1 text-xs text-amber-900">late</span>}
+                    {isEdited(e) && <span className="ml-1 rounded bg-violet-100 px-1 text-xs font-semibold text-violet-900">EDITED</span>}
                     {e.timestamp_flags.filter((f) => FLAGS[f]).map((f) => <span key={f} className="ml-1 rounded bg-slate-100 px-1 text-xs">{FLAGS[f]}</span>)}
                   </span>
                   <span className="flex items-center gap-2">
@@ -212,18 +214,14 @@ export function Register(props: {
                     {/* Late entries belong to a submitted/approved day: the server refuses changes until management
                         reopens it (they decide include/exclude on the closing), so offer no buttons that can only fail. */}
                     {e.late && e.status === "active" && <span className="text-xs text-slate-500">management decides</span>}
-                    {e.status === "active" && !e.late && e.kind !== "product" && (
+                    {e.status === "active" && !e.late && (
                       <button className="rounded px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50" onClick={async () => {
-                        const v = window.prompt("Correct amount (₹):", String(e.amount / 100));
-                        if (v == null) return;
-                        const amt = parseRupees(v);
-                        if (!amt) return setFlash({ ok: false, text: "Enter a whole rupee amount." });
-                        const paid = paidByFood[e.id]?.paid ?? 0;
-                        // The server refuses a food cost below what was already paid; say so here instead of creating a sync problem.
-                        if (e.kind === "food" && amt < paid) return setFlash({ ok: false, text: `${rupees(paid)} was already paid for this food. Remove it and enter it again instead.` });
+                        const data = askCorrection(e, paidByFood[e.id]?.paid ?? 0);
+                        if (typeof data === "string") return setFlash({ ok: false, text: data });
+                        if (!data) return;
                         const why = window.prompt("Reason for the correction:");
                         if (!why?.trim()) return setFlash({ ok: false, text: "A reason is required." });
-                        if (await queue("correct_entry", e.id, { amount: amt }, { base_version: e.version, reason: why.trim() })) saved("Correction saved.");
+                        if (await queue("correct_entry", e.id, data, { base_version: e.version, reason: why.trim() })) saved("Correction saved.");
                       }}>Correct</button>
                     )}
                     {e.status === "active" && !e.late && (
@@ -324,6 +322,47 @@ export function Register(props: {
   );
 }
 
+// Prompt for the corrected values. Returns the changed fields, null if cancelled or unchanged, or an error text.
+function askCorrection(e: RegisterEntry, paid: number): Record<string, unknown> | string | null {
+  if (e.kind === "product") {
+    const v = window.prompt(`Correct quantity of ${e.product_name} (price ${rupees(e.unit_price ?? 0)} each):`, String(e.quantity));
+    if (v == null) return null;
+    const q = Number(v);
+    if (!Number.isInteger(q) || q < 1 || q > 1000) return "Enter a quantity between 1 and 1000.";
+    const m = askMethod(e.payment_method);
+    if (m === undefined) return null;
+    const d: Record<string, unknown> = {};
+    if (q !== e.quantity) d.quantity = q;
+    if (m !== e.payment_method) d.payment_method = m;
+    return Object.keys(d).length ? d : null;
+  }
+  const v = window.prompt("Correct amount (₹):", String(e.amount / 100));
+  if (v == null) return null;
+  const amt = parseRupees(v);
+  if (!amt) return "Enter a whole rupee amount.";
+  // The server refuses a food cost below what was already paid; say so here instead of creating a sync problem.
+  if (e.kind === "food" && amt < paid) return `${rupees(paid)} was already paid for this food. Remove it and enter it again instead.`;
+  const d: Record<string, unknown> = {};
+  if (amt !== e.amount) d.amount = amt;
+  if (e.kind === "service") {
+    // Sales recorded before payment methods existed have none: the correction must say how it was paid.
+    const m = askMethod(e.payment_method);
+    if (m === undefined) return null;
+    if (m !== e.payment_method) d.payment_method = m;
+  }
+  return Object.keys(d).length ? d : null;
+}
+
+function askMethod(current: string | null): "cash" | "paytm" | undefined {
+  for (;;) {
+    const v = window.prompt("Paid by? Type C for Cash or U for UPI / Paytm / Card:", current === "paytm" ? "U" : current === "cash" ? "C" : "");
+    if (v == null) return undefined;
+    const k = v.trim().toUpperCase();
+    if (k === "C") return "cash";
+    if (k === "U") return "paytm";
+  }
+}
+
 function amountOf(d: Record<string, unknown>) {
   if (d.kind === "product") return Number(d.quantity) * Number(d.unit_price);
   return Number(d.amount ?? 0);
@@ -331,7 +370,7 @@ function amountOf(d: Record<string, unknown>) {
 
 function describe(d: Record<string, unknown>, names: Map<string, string>) {
   switch (d.kind) {
-    case "service": return `Service · ${names.get(String(d.staff_id)) ?? "employee"}`;
+    case "service": return `Service · ${names.get(String(d.staff_id)) ?? "employee"}${d.payment_method ? ` · ${PAID_BY[String(d.payment_method)]}` : ""}`;
     case "product": return `Product · ${d.product_name ?? "item"}${d.quantity ? ` × ${d.quantity}` : ""} · ${d.payment_method === "paytm" ? "Paytm" : "Cash"}`;
     case "expense": return `Expense · ${d.description ?? ""}${d.expense_source === "outside_drawer" ? " (outside drawer)" : ""}`;
     case "zakat": return `Zakat${d.staff_id ? ` · ${names.get(String(d.staff_id)) ?? ""}` : ""}`;
@@ -362,9 +401,10 @@ function Keypad({ value, onChange }: { value: string; onChange: (v: string) => v
   );
 }
 
-function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: string, amount: number) => Promise<void> }) {
+function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: string, amount: number, method: "cash" | "paytm") => Promise<void> }) {
   const [sid, setSid] = useState<string | null>(null);
   const [amt, setAmt] = useState("");
+  const [method, setMethod] = useState<"cash" | "paytm" | null>(null);
   if (!staff.length) return <p className="text-sm text-slate-600">No employees are assigned to this outlet today. Ask the manager.</p>;
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -382,9 +422,20 @@ function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: stri
       <div>
         <p className={labelCls}>2. Amount received (after discount)</p>
         <Keypad value={amt} onChange={setAmt} />
-        <button className={`${btnPrimary} mt-3 w-full min-h-14 text-lg`} disabled={!sid || !parseRupees(amt)}
-          onClick={async () => { const p = parseRupees(amt); if (sid && p) { await onSave(sid, p); setAmt(""); setSid(null); } }}>
-          Save sale
+        <fieldset className="mt-3">
+          <legend className={labelCls}>3. Paid by</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(["cash", "paytm"] as const).map((m) => (
+              <button key={m} type="button" aria-pressed={method === m} onClick={() => setMethod(m)}
+                className={`min-h-14 rounded-lg border-2 px-2 text-base font-semibold ${method === m ? "border-brand-700 bg-brand-700 text-white" : "border-slate-300 bg-white"}`}>
+                {method === m && <span aria-hidden="true">✓ </span>}{PAID_BY[m]}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+        <button className={`${btnPrimary} mt-3 w-full min-h-14 text-lg`} disabled={!sid || !parseRupees(amt) || !method}
+          onClick={async () => { const p = parseRupees(amt); if (sid && p && method) { await onSave(sid, p, method); setAmt(""); setSid(null); setMethod(null); } }}>
+          {method ? "Save sale" : "Choose how it was paid"}
         </button>
       </div>
     </div>

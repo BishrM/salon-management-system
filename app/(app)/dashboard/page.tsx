@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { Page, Card, Stat, StateBadge, Notice, Table, fmtTime, btnSecondary } from "@/components/ui";
 import { LiveRefresh } from "@/components/live-refresh";
 import { rupees } from "@/lib/money";
-import { KIND, WARNINGS } from "@/lib/labels";
+import { KIND, WARNINGS, PAID_BY, isEdited } from "@/lib/labels";
 import type { DaySummary } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -22,7 +22,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { supabase, outlet } = ctx;
   const [{ data: summary, error }, { data: recent }, { data: staff }, { count: unassigned }] = await Promise.all([
     supabase.rpc("day_summary", { p_outlet: outlet.id, p_date: date }),
-    supabase.from("entries").select("id, kind, amount, staff_id, product_name, description, meal, status, received_at, recorded_by, late")
+    supabase.from("entries").select("id, kind, amount, staff_id, product_name, description, meal, payment_method, status, version, received_at, recorded_by, late")
       .eq("outlet_id", outlet.id).eq("business_date", date).order("server_seq", { ascending: false }).limit(25),
     supabase.from("staff").select("id, full_name"),
     supabase.from("entries").select("id", { count: "exact", head: true }).eq("outlet_id", outlet.id).is("business_date", null).eq("status", "active"),
@@ -55,7 +55,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {s.warnings.map((w) => <Notice key={w} tone="warn">{WARNINGS[w] ?? w}</Notice>)}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Service sales" value={s.service_total} />
+        <Stat label="Service sales" value={s.service_total}
+          hint={`Cash ${rupees(s.service_cash_recorded)} · UPI/Paytm/Card ${rupees(s.service_paytm_recorded)}${s.service_method_unrecorded ? ` · not recorded ${rupees(s.service_method_unrecorded)}` : ""}`} />
         <Stat label="Commission" value={s.commission_pool} hint="10%, rounded down to ₹10" />
         <Stat label="Product sales" value={s.product_total} hint={`Cash ${rupees(s.product_cash)} · Paytm ${rupees(s.product_paytm)}`} />
         <Stat label="Paytm" value={paytmKnown ? s.paytm_total : null} hint={paytmKnown ? "entered at closing" : "not entered yet"} />
@@ -84,6 +85,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               <span key="d" className={e.status === "voided" ? "line-through text-slate-400" : ""}>
                 {e.kind === "service" ? names.get(e.staff_id ?? "") : e.product_name ?? e.description ?? e.meal ?? ""}
                 {e.late ? " (late)" : ""}
+                {e.payment_method ? <span className="text-slate-500"> · {PAID_BY[e.payment_method]}</span> : null}
+                {isEdited(e) && (ctx.can("audit.read")
+                  ? <Link href={`/admin/audit?table=entries&row=${e.id}`} title="See what changed, who changed it and when"
+                      className="ml-1 rounded bg-violet-100 px-1 text-xs font-semibold text-violet-900 underline">EDITED</Link>
+                  : <span className="ml-1 rounded bg-violet-100 px-1 text-xs font-semibold text-violet-900">EDITED</span>)}
               </span>,
               rupees(e.amount),
             ])}

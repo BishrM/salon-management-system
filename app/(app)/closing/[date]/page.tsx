@@ -83,6 +83,9 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
       <div className="grid gap-5 lg:grid-cols-2">
         <Card title="1. Sales">
           <Row label="Service sales (all payment types)" value={rupees(s.service_total)} />
+          <Row sub label="recorded as cash" value={rupees(s.service_cash_recorded)} />
+          <Row sub label="recorded as UPI / Paytm / Card" value={rupees(s.service_paytm_recorded)} />
+          {s.service_method_unrecorded > 0 && <Row sub label="payment method not recorded (older entries)" value={rupees(s.service_method_unrecorded)} />}
           <Row label="Commission 10% (rounded down to ₹10)" value={`− ${rupees(s.commission_pool)}`} />
           <Row label="Product sales" value={rupees(s.product_total)} />
           <Row sub label="of which cash" value={rupees(s.product_cash)} />
@@ -93,6 +96,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
           <Row label="Paytm total" value={s.paytm_entered ? `− ${rupees(s.paytm_total)}` : "not entered"} />
           <Row strong label="Expected physical cash (SRS formula)" value={rupees(s.net_cash)} />
           {s.paytm_entered && <p className="mt-2 text-xs text-slate-500">Paytm for services (derived): {rupees(s.service_paytm)}.
+            {" "}UPI / Paytm / Card recorded at the counter (services + products): {rupees(s.paytm_recorded_total)}.
             {s.paytm_imported_count > 0 && <> Imported Paytm successes: {rupees(s.paytm_imported_success_total)} ({s.paytm_imported_count}).</>}</p>}
         </Card>
 

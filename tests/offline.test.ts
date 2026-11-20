@@ -229,3 +229,31 @@ describe("sign-out decision", () => {
   });
 });
 
+
+describe("service payment method and corrections offline (client features 4 and 5)", () => {
+  it("keeps the payment method through offline capture, a page reload and a retried sync", async () => {
+    const r = await mod.enqueue(OUTLET, USER, { type: "create_entry", record_id: crypto.randomUUID(),
+      data: { kind: "service", staff_id: "s1", amount: 50000, payment_method: "paytm" } });
+    vi.resetModules(); // a reload: new module instances read the same IndexedDB
+    mod = await import("@/lib/offline/outbox");
+    sync = await import("@/lib/offline/sync");
+    expect((await mod.listOps(USER))[0].op.data.payment_method).toBe("paytm");
+    server.dropNext();
+    await sync.syncNow(USER).catch(() => null);
+    await sync.syncNow(USER);
+    const sent = [...server.seen.values()].map((j) => JSON.parse(j) as Op);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ op_id: r.op_id, device_time: r.op.device_time, data: { payment_method: "paytm" } });
+    expect((await mod.listOps(USER))[0].status).toBe("synced");
+  });
+
+  it("sends a correction with its base version, reason and original device time, once", async () => {
+    const r = await mod.enqueue(OUTLET, USER, { type: "correct_entry", record_id: crypto.randomUUID(), base_version: 1,
+      reason: "typo", data: { amount: 60000, payment_method: "cash" } });
+    await sync.syncNow(USER);
+    await sync.syncNow(USER);
+    const sent = [...server.seen.values()].map((j) => JSON.parse(j) as Op & { base_version: number; reason: string });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ op_id: r.op_id, base_version: 1, reason: "typo", device_time: r.op.device_time });
+  });
+});

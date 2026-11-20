@@ -31,7 +31,7 @@ select tests.login_as('counter');
 select is(
   (public.sync_ops(tests.outlet('A'), pg_temp.id('dev'), 'Tablet',
      jsonb_build_array(tests.op('create_entry', gen_random_uuid(), 1,
-       jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 50000)))) -> 'results' -> 0 ->> 'error'),
+       jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 50000)))) -> 'results' -> 0 ->> 'error'),
   'setup incomplete: the business-day cutoff has not been set for this outlet',
   'entries are refused while the outlet has no cutoff');
 reset role;
@@ -40,7 +40,7 @@ update public.outlets set day_cutoff = '04:00' where id = tests.outlet('A');
 -- Recording each kind -------------------------------------------------------------------------------------
 select tests.login_as('counter');
 insert into res select 'batch1', public.sync_ops(tests.outlet('A'), pg_temp.id('dev'), 'Tablet', jsonb_build_array(
-  tests.op('create_entry', pg_temp.id('s1'), 2, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 50000)),
+  tests.op('create_entry', pg_temp.id('s1'), 2, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 50000)),
   tests.op('create_entry', pg_temp.id('p1'), 3, jsonb_build_object('kind', 'product',
     'product_id', '9a000000-0000-4000-8000-000000000001', 'quantity', 2, 'unit_price', 30000, 'amount', 1, 'payment_method', 'paytm')),
   tests.op('create_entry', pg_temp.id('e1'), 4, jsonb_build_object('kind', 'expense', 'amount', 12000, 'description', 'Shampoo refill')),
@@ -111,7 +111,7 @@ reset role;
 -- Idempotency and conflicts (§6.4) ---------------------------------------------------------------------
 select tests.login_as('counter');
 insert into res select 's2', tests.op('create_entry', pg_temp.id('s2'), 20,
-  jsonb_build_object('kind', 'service', 'staff_id', tests.staff('C'), 'amount', 40000));
+  jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('C'), 'amount', 40000));
 select is(public.sync_ops(tests.outlet('A'), pg_temp.id('dev'), 'Tablet', jsonb_build_array((select v from res where k = 's2')))
           -> 'results' -> 0 ->> 'status', 'applied', 'op applied once');
 select is(public.sync_ops(tests.outlet('A'), pg_temp.id('dev'), 'Tablet', jsonb_build_array((select v from res where k = 's2')))
@@ -129,16 +129,16 @@ reset role;
 -- Out-of-order arrival and gaps ---------------------------------------------------------------------------
 select tests.login_as('counter');
 insert into res select 'gapped', public.sync_ops(tests.outlet('A'), pg_temp.id('dev'), 'Tablet', jsonb_build_array(
-  tests.op('create_entry', gen_random_uuid(), 23, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 10000))));
+  tests.op('create_entry', gen_random_uuid(), 23, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 10000))));
 select is((select v from res where k = 'gapped') -> 'gaps', '[16, 17, 18, 19, 21, 22]'::jsonb,
   'gaps below the highest seq are reported');
 select is(public.sync_ops(tests.outlet('A'), pg_temp.id('dev'), 'Tablet', jsonb_build_array(
-  tests.op('create_entry', gen_random_uuid(), 16, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 10000)),
-  tests.op('create_entry', gen_random_uuid(), 17, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 10000)),
-  tests.op('create_entry', gen_random_uuid(), 18, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 10000)),
-  tests.op('create_entry', gen_random_uuid(), 19, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 10000)),
-  tests.op('create_entry', gen_random_uuid(), 21, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 10000)),
-  tests.op('create_entry', gen_random_uuid(), 22, jsonb_build_object('kind', 'service', 'staff_id', tests.staff('A'), 'amount', 10000))
+  tests.op('create_entry', gen_random_uuid(), 16, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 10000)),
+  tests.op('create_entry', gen_random_uuid(), 17, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 10000)),
+  tests.op('create_entry', gen_random_uuid(), 18, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 10000)),
+  tests.op('create_entry', gen_random_uuid(), 19, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 10000)),
+  tests.op('create_entry', gen_random_uuid(), 21, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 10000)),
+  tests.op('create_entry', gen_random_uuid(), 22, jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('A'), 'amount', 10000))
 )) -> 'gaps', '[]'::jsonb, 'late-arriving lower seqs are accepted and close the gap');
 reset role;
 select is((select last_synced_seq from public.devices where id = pg_temp.id('dev')), 23::bigint, 'contiguous seq advanced to 23');

@@ -85,7 +85,7 @@ insert into k values ('late', gen_random_uuid());
 select is(public.sync_ops(tests.outlet('A'), gen_random_uuid(), 'Tablet', jsonb_build_array(jsonb_build_object(
   'op_id', gen_random_uuid(), 'device_seq', 1, 'type', 'create_entry', 'record_id', pg_temp.k('late'),
   'device_time', '2026-02-01 18:00+05:30', 'device_offset_ms', null, 'device_last_sync_at', null,
-  'data', jsonb_build_object('kind', 'service', 'staff_id', tests.staff('B'), 'amount', 50000))))
+  'data', jsonb_build_object('kind', 'service', 'payment_method', 'cash', 'staff_id', tests.staff('B'), 'amount', 50000))))
   -> 'results' -> 0 -> 'result' ->> 'business_date', null, 'offline entry with unknown clock offset lands in Unassigned');
 select throws_ok($$ select public.assign_business_date('entry', pg_temp.k('late'), '2026-02-01', 'from paper register') $$,
   '42501', null, 'counter cannot assign business dates');

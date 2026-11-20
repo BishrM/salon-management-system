@@ -33,7 +33,7 @@ SQL
 
 as() { echo "select set_config('request.jwt.claims', '{\"sub\":\"a0000000-0000-4000-8000-00000000000$1\",\"role\":\"authenticated\"}', false); set role authenticated;"; }
 op() { # seq record op_id
-  echo "jsonb_build_array(jsonb_build_object('op_id','$3','device_seq',$1,'type','create_entry','record_id','$2','device_time',now(),'device_offset_ms',0,'device_last_sync_at',now(),'data',jsonb_build_object('kind','service','staff_id','5aaa0000-0000-4000-8000-00000000000a','amount',10000)))"
+  echo "jsonb_build_array(jsonb_build_object('op_id','$3','device_seq',$1,'type','create_entry','record_id','$2','device_time',now(),'device_offset_ms',0,'device_last_sync_at',now(),'data',jsonb_build_object('kind','service','payment_method','cash','staff_id','5aaa0000-0000-4000-8000-00000000000a','amount',10000)))"
 }
 fail=0
 check() { if [[ "$2" == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1 (got '$2', want '$3')"; fail=1; fi; }

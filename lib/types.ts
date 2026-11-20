@@ -23,7 +23,9 @@ export type DaySummary = {
   food_paid_drawer_today: number; food_paid_drawer_prior: number; food_paid_drawer: number; food_not_paid_drawer: number;
   drawer_handover_total: number; commission_retained: number; net_cash: number; expected_drawer: number;
   counted_cash: number; variance: number; required_float: number; retained_float: number; float_shortfall: number;
-  take_home: number; paytm_flags: string[]; blockers: string[]; warnings: string[];
+  take_home: number; paytm_flags: string[];
+  // day_summary only (counter-recorded service payment methods, …001500).
+  service_cash_recorded: number; service_paytm_recorded: number; service_method_unrecorded: number; paytm_recorded_total: number; blockers: string[]; warnings: string[];
   allocations: Allocation[]; settlement: Settlement | null;
 };
 
