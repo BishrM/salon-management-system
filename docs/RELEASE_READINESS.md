@@ -364,8 +364,7 @@ ops already blocked on a device before this release recover through "Withdraw" (
 are never auto-skipped.
 
 ## 15. Client features 4 and 5: service payment method, EDITED entries (2026-11-20)
-Not deployed. Committed on `salonops-v1` locally; staging needs `db push` of migration `…001500` plus a
-push of the branch, both awaiting the owner's approval.
+Deployed to staging on 2026-11-20 (see §16). Committed as `fde5947` on `salonops-v1`.
 
 **Feature 4 — Cash / UPI / Paytm / Card on service sales (D-26).** Two buttons ("Cash", "UPI / Paytm /
 Card") sit directly under the service calculator; "Save sale" stays disabled ("Choose how it was paid")
@@ -419,3 +418,58 @@ reason and device time; EDITED rule; labels.
 **Remaining:** apply to staging and repeat the walkthrough there; real tablets (T7, T11, T20, T21);
 service ops queued on a device before the release, without a method, fail with "choose how it was paid"
 and must be withdrawn and re-entered (none expected outside staging).
+
+## 16. Staging deployment of features 4 and 5 (2026-11-20)
+**Pre-checks:** the working tree was clean at `fde5947`. The staging server had no failed, blocked or
+unresolved sync ops (all 22 applied), and every existing row satisfies the relaxed `entries_kind_columns`.
+Queues held in device IndexedDB cannot be inspected from the server: a service sale queued before the
+release without a method fails with "choose how it was paid". The op is stored as failed, nothing is
+applied, and the sender can withdraw it and enter the sale again. None appeared.
+
+**Backup:** taken before the migration, in
+`staging-backups/2026-11-20/4-before-migration-001500_{public-data,schema}.sql` (outside the repo, mode 600).
+
+**Migration:** `supabase db push --linked --yes` applied `20261120001500` to `salonops-staging` at 16:10:09 UTC,
+and remote history lists it. The branch push reached GitHub about 15 s earlier: the first push attempt
+needed explicit CLI consent and was re-run. No entries were written in that window. A before/after
+fingerprint was identical:
+- financial data: entries, food payments and float movements (count + hash); audit count; sync ops;
+- protections: 0 tables without RLS, 21 policies, 45 user triggers, 0 disabled;
+- privileges: the same 9 app helpers callable by clients, no public function callable by anon.
+
+`app.payment_method` is not callable by any client role.
+
+**Deploy:** `fde5947` pushed to `origin/salonops-v1`; the Vercel GitHub integration deployed it
+(status success) to https://salonops-staging.vercel.app. `main` untouched, no production deployment.
+
+**Live verification (Staging S5, simulated data, staging test accounts):**
+
+| Check | Result |
+|---|---|
+| Counter: ₹500 Cash and ₹700 UPI/Paytm/Card sales; refresh | stored `cash` / `paytm`, shown after reload |
+| Counter: ₹300 UPI sale entered offline, then online | queued with method, synced once as `paytm` |
+| Counter: correct 2 older sales without a method (₹400 → Cash; ₹250 → ₹350 UPI), ₹700 UPI → ₹750 Cash, product qty 1 → 2 | version 2, EDITED in Register and dashboard |
+| Owner dashboard | services ₹2,300 = Cash ₹1,650 + UPI/Paytm/Card ₹650; commission ₹230; products ₹500 (Paytm) |
+| Owner audit via EDITED | original → corrected values, "not recorded → UPI / Paytm / Card", counter, server + device time, reason |
+| Head closing: Paytm ₹1,000 vs recorded ₹1,150 | mismatch warning shown; at ₹1,150 it clears |
+| Cash reconciliation | net cash ₹1,420 = 2,300 − 230 + 500 − 1,150; drawer ₹3,650 counted exactly; revision 1 submitted (head), approved (owner); stored service Paytm ₹650 = recorded |
+| Counter corrects an entry of the approved day | refused SO423, entry unchanged; test op withdrawn |
+| Head opens /admin/audit | redirected (denied) |
+| Outsider: S5 audit row / correction via /api/sync | no rows / 403 |
+| Duplicates | every S5 entry: 1 applied create op, 1 INSERT audit, UPDATE audits = version − 1; no duplicate op ids |
+| Register at 375 px | no horizontal scroll, buttons 151×56 px |
+| Console | only the known React #418 hydration warning |
+
+**Defect found (D8, fixed locally, not yet deployed):** offline reload on the deployed build showed
+"This page has not been opened on this device before". `public/sw.js` called `res.clone()` inside an
+async callback, after the response had been handed to the page, so the clone failed. Nothing was ever
+cached: only the five install-time shell files were in the cache. The fix clones before returning and
+bumps the cache to `salonops-v3`. On a local production build: `/register` and the build assets were
+cached (16 entries); a ₹420 UPI sale entered offline survived an offline reload and synced once as
+`paytm`. Entering and syncing offline worked before the fix; only reloading or opening pages offline
+was broken.
+
+**Other findings (not fixed):** the Register still offers Correct/Remove on non-late entries of a submitted
+or approved day, and the server refuses them (SO423) as a failed op the counter must withdraw. React #418
+(times formatted server-side in UTC vs client IST) remains. Staging S3 keeps 13 service rows with no
+recorded method (live user data, untouched).
