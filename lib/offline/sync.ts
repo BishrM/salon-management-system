@@ -6,7 +6,7 @@ export type SyncSummary = { pending: number; failed: number; conflict: number; b
 
 type ServerResult = { op_id: string; status: string; error?: string; result?: Record<string, unknown>; blocked_by?: string | null };
 
-function label(): string {
+export function deviceLabel(): string {
   const ua = navigator.userAgent;
   return /iPad|Tablet|Android(?!.*Mobile)/i.test(ua) ? "Tablet" : /Mobile|iPhone|Android/i.test(ua) ? "Phone" : "Computer";
 }
@@ -17,7 +17,7 @@ async function sendBatch(outletId: string, rows: OutboxRow[]): Promise<void> {
   const res = await fetch("/api/sync", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ outlet_id: outletId, device_id: meta.device_id, device_label: label(), ops: rows.map((r) => r.op) }),
+    body: JSON.stringify({ outlet_id: outletId, device_id: meta.device_id, device_label: deviceLabel(), ops: rows.map((r) => r.op) }),
   });
   const t1 = Date.now();
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `Sync failed (${res.status})`);

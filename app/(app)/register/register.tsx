@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { enqueue, listOps, removeOps, exportPending, getMeta, type OutboxRow } from "@/lib/offline/outbox";
-import { withdrawSyncOp } from "@/app/(app)/actions";
+import { withdrawSyncOp, withdrawBlockedOp } from "@/app/(app)/actions";
+import { deviceLabel } from "@/lib/offline/sync";
 import { commissionPool } from "@/lib/accounting";
 import { rupees, parseRupees } from "@/lib/money";
 import { KIND, FLAGS } from "@/lib/labels";
@@ -74,6 +75,27 @@ export function Register(props: {
     const r = await withdrawSyncOp(fd).catch(() => ({ ok: false as const, error: "Could not reach the server. Try again when online." }));
     if (!r.ok) return setFlash({ ok: false, text: r.error });
     if (localRow) await removeOps(userId, [localRow]);
+    window.dispatchEvent(new Event("salonops:queued"));
+    await refresh();
+    saved(r.message ?? "Withdrawn.");
+  }
+
+  // A blocked op was never stored on the server: send it with the withdrawal so the server records it as
+  // withdrawn under its own op id (a later re-send is then a duplicate and never runs).
+  async function withdrawBlocked(row: OutboxRow) {
+    const why = window.prompt("Why withdraw this change? (it stays in the history for the manager)");
+    if (!why?.trim()) return setFlash({ ok: false, text: "A reason is required." });
+    const meta = await getMeta().catch(() => null);
+    if (!meta) return setFlash({ ok: false, text: "This device's saved entries could not be read. Reload and try again." });
+    const fd = new FormData();
+    fd.set("outlet", row.outlet_id);
+    fd.set("device", meta.device_id);
+    fd.set("label", deviceLabel());
+    fd.set("op", JSON.stringify(row.op));
+    fd.set("reason", why.trim());
+    const r = await withdrawBlockedOp(fd).catch(() => ({ ok: false as const, error: "Could not reach the server. Try again when online." }));
+    if (!r.ok) return setFlash({ ok: false, text: r.error });
+    await removeOps(userId, [row.op_id]);
     window.dispatchEvent(new Event("salonops:queued"));
     await refresh();
     saved(r.message ?? "Withdrawn.");
@@ -276,7 +298,12 @@ export function Register(props: {
                           <button className="mt-1 text-xs font-semibold underline" onClick={() => withdraw(by)}>Withdraw the earlier failed change</button>
                         </>
                       );
-                      return <div className="mt-1 text-xs">Waits for the entry it changes to reach the server. Keep this device online; if it never arrives, tell the manager.</div>;
+                      return (
+                        <>
+                          <div className="mt-1 text-xs">Waits for the entry it changes to reach the server. If that entry no longer exists, withdraw this change.</div>
+                          <button className="mt-1 text-xs font-semibold underline" onClick={() => withdrawBlocked(r)}>Withdraw this change</button>
+                        </>
+                      );
                     })()}
                   </li>
                 ))}

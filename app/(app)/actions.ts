@@ -280,6 +280,16 @@ export async function withdrawSyncOp(fd: FormData) {
     (v) => ({ p_op_id: v.op, p_note: v.reason }), "Withdrawn. Changes waiting behind it will be sent again.");
 }
 
+/** The sender withdraws a change blocked on a missing entry (never stored, so withdrawSyncOp cannot reach it). */
+export async function withdrawBlockedOp(fd: FormData) {
+  const op = z.string().max(20_000).transform((s, ctx) => {
+    try { return JSON.parse(s) as Record<string, unknown>; } catch { ctx.addIssue({ code: "custom", message: "Invalid change" }); return z.NEVER; }
+  });
+  return rpcAction(z.object({ outlet: uuid, device: uuid, label: z.string().max(80), op, reason }), obj(fd), "withdraw_blocked_op",
+    (v) => ({ p_outlet: v.outlet, p_device: v.device, p_device_label: v.label, p_op: v.op, p_note: v.reason }),
+    "Withdrawn. It stays in the history and will not be sent again.");
+}
+
 export async function resolveSyncIssue(fd: FormData) {
   return rpcAction(z.object({ id: z.coerce.number().int().positive(), reason }), obj(fd), "resolve_sync_issue",
     (v) => ({ p_sync_op: v.id, p_note: v.reason }), "Resolved.");
