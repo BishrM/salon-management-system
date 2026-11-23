@@ -11,7 +11,8 @@ select tests.initial_float(2000, '2026-03-01');
 create temp table k (name text primary key, v uuid);
 grant select, insert, update on k to authenticated;
 create function pg_temp.k(p text) returns uuid language sql as $$ select v from k where name = p $$;
-create temp table today_ist as select (now() at time zone 'Asia/Kolkata')::date as d;
+-- Business date of outlet A now (India time minus the 04:00 cutoff): deactivation is dated from it.
+create temp table today_ist as select app.business_date(tests.outlet('A'), now()) as d;
 grant select on today_ist to authenticated;
 
 -- 1. Employee management by the Shop/Staff login ---------------------------------------------------
@@ -24,7 +25,7 @@ select lives_ok($$ select public.update_staff(tests.staff('C'), 'Chetan', false,
   'Shop/Staff deactivates an employee');
 reset role;
 select is((select row(active, inactive_from)::text from public.staff where id = tests.staff('C')),
-  row(false, (select d + 1 from today_ist))::text, 'deactivation is dated: inactive from tomorrow (India time)');
+  row(false, (select d + 1 from today_ist))::text, 'deactivation is dated: inactive from the next business date');
 select ok(app.staff_assigned(tests.staff('C'), tests.outlet('A'), '2026-03-04'),
   'a deactivated employee stays valid for dates before deactivation');
 select ok(not app.staff_assigned(tests.staff('C'), tests.outlet('A'), (select d + 1 from today_ist)),

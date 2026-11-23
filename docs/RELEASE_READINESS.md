@@ -612,8 +612,9 @@ commission-rounding case with non-round sales on staging (covered by pgTAP).
 
 ## 19. Fixes for W1–W3 from the staging walkthrough (2026-11-23, local only)
 
-Branch `fix/w1-w3-staging-ui`, based on `1682315` (docs only on top of the deployed `e22e8d4`). No migration,
-no data change, nothing pushed or deployed.
+Branch `fix/w1-w3-staging-ui`, based on `1682315` (docs only on top of the deployed `e22e8d4`). W1–W3 in
+`45df464` (no migration); the W1 midnight-to-cutoff edge case in the next commit (one forward migration,
+function-only, no data change).
 
 **W1, employee missing from the Register on the deactivation day.**
 - Root cause: `app/(app)/register/page.tsx` kept only `staff.active` rows. Deactivation sets `active = false`
@@ -628,9 +629,19 @@ no data change, nothing pushed or deployed.
   (9: valid before deactivation; valid and a sale accepted through `sync_ops` on the deactivation business
   date; refused from the next business date; a late offline entry dated to the earlier working day accepted
   and kept on that day with its employee; commission allocations still name the employee).
-- Known limit, not changed (would need a migration): the trigger dates `inactive_from` from the India
-  calendar date, not the business date. A deactivation between midnight and the 04:00 cutoff therefore keeps
-  the employee for one extra business day. Owner to decide whether this matters.
+- Midnight-to-cutoff edge case, fixed by migration `20261123002000_deactivation_business_date.sql`: the
+  trigger used to date `inactive_from` from the India **calendar** date + 1, so a deactivation at 01:00 on
+  24 Nov (business date 23 Nov) gave 25 Nov, one extra business day. New `app.staff_inactive_from_at(staff,
+  instant)` = `app.business_date(outlet, instant) + 1` for the outlet of the employee's current assignment
+  (outlet timezone and configured cutoff; the existing business-date function, no second definition);
+  employees with no outlet cutoff keep the calendar rule. `app.staff_set_inactive_from` calls it with `now()`.
+  Function-only: no staff row, sale, commission or closing is changed; rows deactivated before the migration
+  keep their stored date. Tests: `supabase/tests/14_deactivation_cutoff_test.sql` (16: 23:59, 00:01, 01:00,
+  03:59:59.999 → next date 24 Nov; exactly 04:00 and 10:30 → 25 Nov; the same instant in UTC; a 06:00 cutoff
+  is honoured; the trigger uses business date + 1; available on the deactivation business date and not the
+  next, for 01:00 and 04:00; the day's commission still names the employee and the sale is kept; no cutoff →
+  calendar fallback). Test 12's expectation changed from "India calendar date + 1" to "business date + 1".
+  Late offline entries stay covered by test 13 (unchanged, passing).
 
 **W2, React #418 hydration error on the Register.**
 - Root cause: `register.tsx` formatted `received_at` with `toLocaleTimeString` and no time zone, so the server
@@ -648,8 +659,15 @@ no data change, nothing pushed or deployed.
 - Verified on the local production build: Dashboard and Reports page width = viewport at 375, 768 and
   1280 px (two columns at 1280); wide tables scroll inside their cards.
 
-**Test results (this branch):** vitest 76/76 (6 files); pgTAP 500/500 (13 files, local PG17 harness);
+**Test results (`45df464`):** vitest 76/76 (6 files); pgTAP 500/500 (13 files, local PG17 harness);
 `tsc --noEmit` clean; `eslint` clean; `next build` succeeded.
+
+**Test results (with the edge-case fix):** vitest 76/76 (6 files); pgTAP 516/516 (14 files) on the local PG17
+harness **and** 516/516 via `supabase test db` on the local Docker stack (migration applied with
+`supabase migration up --local`); concurrency script 13/13; `tsc --noEmit` clean; `eslint` clean;
+`next build` succeeded. Local production build (`TZ=UTC`, port 3001): Register lists Chandan (inactive
+from 24 Nov) on business date 23 Nov, entry times "04:21 pm", no console errors; Dashboard and Reports page
+width ≤ viewport at 375, 768 and 1280 px, two columns at 1280.
 
 **Still to do:** approval to push and deploy this branch to staging, then re-check W1–W3 there; real
 tablets/offline (T7, T11, T20, T21).
