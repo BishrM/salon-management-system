@@ -528,3 +528,62 @@ repayment through the form left ₹100. 375 px and 768 px: no horizontal page sc
 **Not verified:** staging/production (not applied), real tablets/offline on device, the export file opened in
 Excel (code path type-checked and built only), concurrent repayments from two sessions (serialised by an
 outlet row lock, not exercised by the concurrency script).
+
+## 18. Staging release of the two-account model (2026-11-23)
+**Released commit:** `e22e8d4` (= `e3f19bc` + migration `…001900` that sets the food-policy start date from
+each outlet's business day, and a concurrent-repayment test). `feature/two-account-model` pushed;
+`salonops-v1` fast-forwarded `fde5947 → e22e8d4` (owner's choice; no history rewritten). `main` untouched.
+No production project exists or was touched.
+
+**Targets confirmed:** Supabase `salonops-staging` (`nzwmfoixqffwqzntvscn`), Vercel `salonops-staging`
+(production branch `salonops-v1`; the feature-branch preview was skipped by the Ignored Build Step).
+
+**Pre-checks:** working tree clean; 5 auth users (owner, manager, outsider, head, counter), no Shop/Staff
+login; 31 server sync ops (30 applied, 1 failed and resolved, none pending); the in-app browser that ran
+earlier staging tests had no IndexedDB outbox for the staging origin. Real tablets: none in use.
+
+**Backup** (`~/Desktop/Salons/staging-backups/2026-11-23/`, directory 700, files 600; SHA-256 in `SHA256SUMS`):
+`before-001600_schema.sql` and `before-001600_data.sql` (schemas `public`, `app`, `supabase_migrations`),
+`fingerprint-before.txt`, `fingerprint-after.txt`, `git-head.txt`. Verified: COPY row counts equal live
+counts for all 16 checked tables, and a restore into a throwaway PostgreSQL 17 database (auth stub,
+triggers off for the data load) reproduced the data fingerprint of all 19 tables **identically** (UTC).
+Auth users are not in this backup (password hashes stay in Supabase).
+
+**Migration:** dry run listed exactly `…001600`–`…001900`, no seed; `supabase db push` applied them at
+11:17:50–11:17:52 UTC; remote history lists all four. Before/after (`fingerprint-*.txt`): all 19 data
+tables identical (entries, food payments, float, closings, drafts, revisions, denominations, allocations,
+events, handovers, late reviews, Paytm, staff, assignments, memberships, outlets, profiles, sync ops,
+audit log — new columns excluded); policies 21 → 22 (`food_repayments_select`), user triggers 45 → 48
+(staff deactivation date, repayment immutability + audit), 0 disabled; tables without RLS 0; anon-callable
+functions 0; definer functions without `search_path` 0; client-callable `app` helpers unchanged. Replaced
+CHECKs `rev_food_split`/`rev_bridge` validated against the existing revision; `rev_closed_by` NOT VALID.
+**Effective date recorded:** `food_rule_v2_from = 2026-11-23` (India business date at apply time) on every
+staging outlet; the existing pre-migration closing (S5, 20 Nov) recomputes live to exactly its frozen values.
+
+**Deployment:** Vercel `dpl_7CQggXFesSKVXHgbVtUEGzLtCo9E`, Ready, aliased to
+https://salonops-staging.vercel.app; GitHub commit status of `e22e8d4` points to this deployment; the live
+`/sw.js` is the new build (`salonops-v3`).
+
+**Shop/Staff login:** `shop@salonops-staging.test`, created by the procedure in STAGING_SETUP §1.6a
+(password generated into `.env.staging.local`, never displayed), membership `shop` on Staging Test Salon
+added by the owner.
+
+**Live acceptance (REST as each real staging login, simulated data on Staging Test Salon, 23 Nov):**
+| Check | Result |
+|---|---|
+| Owner / manager / outsider / head / counter / shop sign in | all authenticate |
+| Manager permissions | previous set retained except `delegation.manage` (retired for everyone); gains `food_repayment.record` |
+| Retired head and counter | `my_permissions` = [], no outlets, no entries visible |
+| Shop/Staff | exactly 7 operational permissions; sees only Staging Test Salon; on another outlet `day_summary`, `food_debt_summary`, `prepare_closing`, `create_staff` → 403; owner-only `approve_closing`, `reopen_closing`, `record_food_repayment`, `establish_initial_float`, `set_outlet_cutoff` → 403; second Shop/Staff login and retired roles refused |
+| Employees | shop added "Esha (sim)", renamed, deactivated → `inactive_from` 24 Nov; dropdown for 23 Nov includes her, for 24 Nov not; other-outlet employee refused; history kept |
+| Sync | 5 ops (cash + UPI services, breakfast/lunch/dinner) applied; identical resend → no duplicates (5 entries, 5 ops) |
+| Closing | blockers incl. "who performed" until set; S ₹15,000 → C ₹1,500; food ₹2,100 = breakfast ₹300 (salon) + lunch/dinner ₹1,800; deducted ₹1,500; owed ₹300; payable ₹0; N ₹8,500; ED ₹12,000 counted exactly; recorded UPI = Paytm total (no warning) |
+| Actor vs employee | revision `submitted_by` = shop, `closed_by` = Esha; events: submitted by shop, approved by manager |
+| Debt and repayments | pending ₹300 before approval, outstanding ₹300 after; ₹100 partial (owner, cash, employees named) → ₹200; **two simultaneous ₹200 attempts (owner + manager): one stored, one refused** → ₹0 |
+| Drawer unaffected | revision ED unchanged; next day opens with the retained ₹2,000 only |
+| Reopen | shop cannot reopen (403); owner reopens; debt moves to pending (outstanding −₹300 shown as "repaid more than currently owed"); shop changes employee to Arun; rev 2 approved by owner; rev 1 byte-identical (Esha); audit Esha → Arun by shop |
+| Audit | every change recorded with the true login (shop / manager / owner) |
+
+**Not yet done on staging:** the browser walkthrough of the new screens at 375/768 px with the staging logins
+(needs a person to sign in in the browser; the same screens were verified locally); real tablets/offline
+(T7, T11, T20, T21); a commission-rounding case with non-round sales on staging (covered by pgTAP).

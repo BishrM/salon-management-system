@@ -9,7 +9,7 @@ real staff phone numbers. Production has **not** been created.
 | Vercel project | `salonops-staging` (team `bishrpapt-5536s-projects`), Node 24.x, framework Next.js |
 | Supabase project | `salonops-staging`, ref `nzwmfoixqffwqzntvscn`, region `ap-south-1`, Postgres 17, free plan |
 | Branch deployed | `salonops-v1` (never `main`) |
-| Test logins | owner, manager, outsider (second outlet); head and counter are legacy and grant nothing once `…001700` is applied — a HUDCO **Shop/Staff** login must then be created (D-28) — `*@salonops-staging.test`, random passwords kept **only** in the git-ignored `.env.staging.local` on the developer Mac (move them to the team password manager) |
+| Test logins | owner, manager, outsider (second outlet), and the **Shop/Staff** login of "Staging Test Salon" (HUDCO stand-in, created 2026-11-23); head and counter remain as retired logins that grant nothing (D-28) — `*@salonops-staging.test`, random passwords kept **only** in the git-ignored `.env.staging.local` on the developer Mac (move them to the team password manager) |
 | Outlets | "Staging Test Salon" and "Isolation Test Outlet (staging)" (simulated data) |
 
 **Deployments:** the Vercel project is linked to GitHub `BishrM/salon-management-system` with production
@@ -107,6 +107,19 @@ staging URL is reachable from the internet.
    password), then the initial float. Employees never get logins (D-28).
 4. For isolation checks, bootstrap a second outlet with a second owner.
 5. Record test credentials in the team password manager, not in the repository.
+
+### 1.6a Creating an outlet's Shop/Staff login without exposing the password (used 2026-11-23)
+1. Check nothing exists: `select count(*) from auth.users where email = '<shop email>'` and no active `shop`
+   membership for the outlet.
+2. Generate the password locally straight into the git-ignored env file (mode 600), never on screen:
+   `printf 'STAGING_SHOP_EMAIL=…\nSTAGING_SHOP_PASSWORD=%s\n' "$(openssl rand -base64 18 | tr -dc A-Za-z0-9)" >> .env.staging.local`.
+3. Create the auth user with the Auth admin API, reading the secret key and the password inside the same
+   shell command (`supabase projects api-keys --reveal` piped, never echoed), `email_confirm: true`.
+4. As the **owner** (REST `rpc/add_membership` or Admin → Logins → "Give an existing login a role here"):
+   role `shop`, with a reason. The database refuses a second Shop/Staff login for the outlet.
+5. Verify: `my_permissions` returns the seven Shop/Staff permissions and `outlets` returns only that outlet.
+6. Hand the password over in person / via the team password manager. Retire head/counter logins only after
+   the Shop/Staff login is in use (they already grant nothing; revoking them is optional housekeeping).
 
 ### 1.7 Backup and recovery
 | Environment | Requirement |
