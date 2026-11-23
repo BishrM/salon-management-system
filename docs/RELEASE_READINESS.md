@@ -721,3 +721,40 @@ the feature branch was cancelled by the Ignored Build Step, as intended).
 
 **Not done:** real-tablet tests T7, T11, T20, T21; a live deactivation inside the 00:00–04:00 window.
 Open owner decisions U1–U4 (DECISIONS.md) are unchanged.
+
+## 21. Daily Sheet, split payments and tips (2026-11-24, local only)
+
+Branch `feat/daily-sheet-split-payments` from `2eeef49`. **Not pushed, not deployed; staging and production
+unchanged.** Decision record: D-32; open questions U5 (tip cash handling) and U6 (notification scope).
+
+**Migrations (forward only, no existing row changed).**
+- `20261124002100_payment_method_split.sql`: adds the enum value `payment_method = 'split'` (own file: a new
+  enum value cannot be used in the transaction that adds it).
+- `20261124002200_split_payments_tips_daily_sheet.sql`: `entries.split_cash`, `split_paytm` (NULL unless
+  split), `tip_cash`, `tip_paytm` (default 0) with constraints (split parts ≥ 0 and = amount, service only;
+  tips ≥ 0, service only; products and food repayments can never be `split`); the entries guard allows the
+  four columns to change through a correction; `app.entry_values`, `app.op_create_entry`,
+  `app.op_correct_entry` and `public.day_summary` replaced (same as before plus split/tips);
+  `public.sheet_opens` + `open_daily_sheet()`; `app.sheet_total_at()` + `public.sheet_changes()` (owner,
+  `audit.read`). `compute_day`, revisions and the cash model are **not** changed.
+
+**App.** Register: Cash / UPI / Paytm / Card / Split (two amounts that must add up), optional explicit tip
+(cash and/or UPI); corrections accept S and tips. Closing: "What is the total Paytm / UPI / Card amount
+received today?" (required by the existing `paytm_missing` blocker), Register-recorded UPI total, difference,
+tips line. Closing tab: business date + **Open Closing Sheet** → `/closing/sheet` (paper layout: DATE/DAY,
+title, LUNCH/DINNER corner; Sl. No. column, numbered employee columns with names below, sales listed
+vertically, TOTAL and ALL rows; EXPENSES / PRODUCT SALE / ROLLING / ACCOUNTS block; no PTM columns; rolling
+counts and Paytm total editable only on an editable draft, saved through `update_draft`). Owner nav:
+**Sheet changes**.
+
+**Tests.** vitest 94/94 (new `tests/daily-sheet.test.ts`: layout mapping, Accounts order, split/tip
+validation, notice text). pgTAP 572/572 on both `supabase test db` (Docker) and the PG17 harness from a clean
+database (new `15_split_tips_daily_sheet_test.sql`, 56). `scripts/test-concurrency.sh` 13/13. `tsc`, `eslint`,
+`next build` clean. Local production server (port 3001): split sale with tip saved through the offline queue;
+sheet opened from the Closing tab; owner Sheet changes listed the later sale with the employee total
+₹15,000 → ₹15,200; rolling/Paytm saved from the sheet (difference −₹100 → ₹0); widths 375 / 768 / 1280
+without page overflow (sheet scrolls inside its box). Screenshots: `docs/screenshots/daily-sheet-*.jpg`,
+`register-split-tip.jpg`.
+
+**Not tested:** a real tablet; going offline in the browser (offline sync of a split sale is covered by
+pgTAP with an old device time); the staging database.

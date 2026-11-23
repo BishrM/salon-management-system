@@ -6,6 +6,7 @@ import { ActionForm } from "@/components/action-form";
 import { prepareClosing, recordFoodRepayment, reverseFoodRepayment } from "../actions";
 import { PAID_BY } from "@/lib/labels";
 import { rupees, signedRupees } from "@/lib/money";
+import { OpenSheetForm } from "./sheet/open-form";
 
 export const metadata: Metadata = { title: "Closing" };
 
@@ -27,6 +28,7 @@ export default async function ClosingList() {
   return (
     <Page title="Daily closing">
       {!today && <Notice tone="warn">Setup is not finished (business-day cutoff).</Notice>}
+      {today && <OpenSheetForm today={today} />}
       {today && ctx.can("closing.prepare") && (
         <Card title="Close a day">
           <ActionForm action={prepareClosing} submit="Open closing" inline>

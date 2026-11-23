@@ -23,7 +23,7 @@ export default async function RegisterPage() {
       .eq("outlet_id", outlet.id).lte("start_date", today).or(`end_date.is.null,end_date.gte.${today}`),
     supabase.from("product_catalog").select("id, name, default_price").eq("outlet_id", outlet.id).eq("active", true).order("name"),
     supabase.from("entries")
-      .select("id, kind, amount, staff_id, product_name, quantity, unit_price, payment_method, description, meal, expense_source, status, version, received_at, late, timestamp_flags, business_date")
+      .select("id, kind, amount, staff_id, product_name, quantity, unit_price, payment_method, split_cash, split_paytm, tip_cash, tip_paytm, description, meal, expense_source, status, version, received_at, late, timestamp_flags, business_date")
       .eq("outlet_id", outlet.id).or(`business_date.eq.${today},business_date.is.null`).order("server_seq", { ascending: false }).limit(300),
     supabase.from("entries").select("id, amount, meal, business_date, food_payments(id, amount, reverses_payment_id)")
       .eq("outlet_id", outlet.id).eq("kind", "food").eq("status", "active").gte("business_date", addDays(today, -7)),

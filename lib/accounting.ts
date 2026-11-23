@@ -90,3 +90,28 @@ export function foodPaid(payments: FoodPayment[]): { paid: number; activeIds: st
   const active = originals.filter((p) => !reversed.has(p.id));
   return { paid: active.reduce((a, p) => a + p.amount, 0), activeIds: active.map((p) => p.id) };
 }
+
+export type PayMethod = "cash" | "paytm" | "split";
+
+/**
+ * Register service payment (…002200). Mirrors app.entry_values: a split's cash and UPI / Paytm / Card parts must
+ * add up to the service amount exactly; tips are separate, never part of the amount. Paise in, sync payload out.
+ */
+export function servicePayment(i: { amount: number; method: PayMethod; splitCash?: number | null; splitPaytm?: number | null;
+  tipCash?: number | null; tipPaytm?: number | null }): { ok: true; data: Record<string, unknown> } | { ok: false; error: string } {
+  const data: Record<string, unknown> = { amount: i.amount, payment_method: i.method };
+  if (i.method === "split") {
+    if (i.splitCash == null || i.splitPaytm == null || i.splitCash < 0 || i.splitPaytm < 0)
+      return { ok: false, error: "Enter both the cash part and the UPI / Paytm / Card part (₹0 or more)." };
+    if (i.splitCash + i.splitPaytm !== i.amount)
+      return { ok: false, error: `Cash + UPI / Paytm / Card must add up to the service amount (now ${(i.splitCash + i.splitPaytm) / 100} of ${i.amount / 100}). Enter any tip separately.` };
+    data.split_cash = i.splitCash;
+    data.split_paytm = i.splitPaytm;
+  }
+  for (const [k, v] of [["tip_cash", i.tipCash], ["tip_paytm", i.tipPaytm]] as const) {
+    if (v == null || v === 0) continue;
+    if (v < 0) return { ok: false, error: "A tip cannot be negative." };
+    data[k] = v;
+  }
+  return { ok: true, data };
+}

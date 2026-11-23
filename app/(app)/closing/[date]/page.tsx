@@ -112,6 +112,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
           <Row sub label="recorded as cash" value={rupees(s.service_cash_recorded)} />
           <Row sub label="recorded as UPI / Paytm / Card" value={rupees(s.service_paytm_recorded)} />
           {s.service_method_unrecorded > 0 && <Row sub label="payment method not recorded (older entries)" value={rupees(s.service_method_unrecorded)} />}
+          {(s.tips_cash > 0 || s.tips_paytm > 0) && <Row sub label="Tips for employees — not sales, no commission (cash / UPI)" value={`${rupees(s.tips_cash)} / ${rupees(s.tips_paytm)}`} />}
           <Row label="Commission 10% (rounded down to ₹10)" value={`− ${rupees(s.commission_pool)}`} />
           <Row label="Product sales" value={rupees(s.product_total)} />
           <Row sub label="of which cash" value={rupees(s.product_cash)} />
@@ -119,10 +120,11 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
           <Row label="Expenses from drawer" value={`− ${rupees(s.expenses_total)}`} />
           {s.expenses_outside_total > 0 && <Row sub label="Expenses paid outside the drawer (not deducted)" value={rupees(s.expenses_outside_total)} />}
           <Row label="Zakat" value={`− ${rupees(s.zakat_total)}`} />
-          <Row label="Paytm total" value={s.paytm_entered ? `− ${rupees(s.paytm_total)}` : "not entered"} />
+          <Row label="Paytm total (statement)" value={s.paytm_entered ? `− ${rupees(s.paytm_total)}` : "not entered"} />
           <Row strong label="Expected physical cash (SRS formula)" value={rupees(s.net_cash)} />
-          {s.paytm_entered && <p className="mt-2 text-xs text-slate-500">Paytm for services (derived): {rupees(s.service_paytm)}.
-            {" "}UPI / Paytm / Card recorded at the counter (services + products): {rupees(s.paytm_recorded_total)}.
+          <Row sub label="UPI / Paytm / Card recorded at the counter (services + products + tips)" value={rupees(s.paytm_recorded_total)} />
+          {s.paytm_difference != null && <Row sub label="Difference: statement − counter" value={<span className={s.paytm_difference ? "font-semibold text-rose-700" : ""}>{signedRupees(s.paytm_difference)}</span>} />}
+          {s.paytm_entered && <p className="mt-2 text-xs text-slate-500">The statement total is used for the cash check. Paytm for services (derived): {rupees(s.service_paytm)}.
             {s.paytm_imported_count > 0 && <> Imported Paytm successes: {rupees(s.paytm_imported_success_total)} ({s.paytm_imported_count}).</>}</p>}
         </Card>
 
@@ -230,8 +232,9 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
             <ActionForm action={updateDraft} submit="Save" resetOnSuccess={false}>
               <input type="hidden" name="closing" value={closing} />
               <div className="grid gap-3 sm:grid-cols-3">
-                <div><label className={labelCls} htmlFor="pt">Paytm total today (₹)</label>
-                  <input id="pt" name="paytm_total" inputMode="numeric" className={input} defaultValue={s.paytm_entered ? s.paytm_total / 100 : ""} placeholder="0 if none" /></div>
+                <div className="sm:col-span-3"><label className={labelCls} htmlFor="pt">What is the total Paytm / UPI / Card amount received today? (₹, required)</label>
+                  <input id="pt" name="paytm_total" inputMode="numeric" className={input} defaultValue={s.paytm_entered ? s.paytm_total / 100 : ""} placeholder="0 if none" />
+                  <p className="mt-1 text-xs text-slate-500">Take it from the payment statement: services, products and tips paid by UPI / Paytm / Card. The counter recorded {rupees(s.paytm_recorded_total)}.</p></div>
                 <div><label className={labelCls} htmlFor="pu">of which UPI (optional)</label>
                   <input id="pu" name="paytm_upi" inputMode="numeric" className={input} defaultValue={s.paytm_upi != null ? s.paytm_upi / 100 : ""} /></div>
                 <div><label className={labelCls} htmlFor="pc">of which card (optional)</label>
@@ -272,6 +275,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
             <Row label="Opening float" value={rupees(s.opening_float)} />
             {s.intraday_top_ups !== 0 && <Row label="Added during the day" value={rupees(s.intraday_top_ups)} />}
             <Row label="Cash sales (services + products − Paytm)" value={rupees(s.cash_sales)} />
+            {s.tips_paytm > 0 && <p className="text-xs text-slate-600">The Paytm total includes {rupees(s.tips_paytm)} of UPI / Paytm / Card tips, paid to the employees in cash from the drawer.</p>}
             <Row label="Expenses and zakat" value={`− ${rupees(s.expenses_total + s.zakat_total)}`} />
             <Row label="Food paid from drawer" value={`− ${rupees(s.food_paid_drawer)}`} />
             <Row label="Commission handed from drawer" value={`− ${rupees(s.drawer_handover_total)}`} />

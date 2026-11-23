@@ -11,7 +11,7 @@ describe("EDITED tag (client feature 5)", () => {
 });
 
 describe("payment method labels (client feature 4)", () => {
-  it("shows the two counter options, with UPI and card combined under Paytm", () => {
-    expect(PAID_BY).toEqual({ cash: "Cash", paytm: "UPI / Paytm / Card" });
+  it("shows the counter options (cash, UPI / Paytm / Card combined, split)", () => {
+    expect(PAID_BY).toEqual({ cash: "Cash", paytm: "UPI / Paytm / Card", split: "Split (Cash + UPI / Paytm / Card)" });
   });
 });

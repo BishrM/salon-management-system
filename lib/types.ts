@@ -30,6 +30,9 @@ export type DaySummary = {
   take_home: number; paytm_flags: string[];
   // day_summary only (counter-recorded service payment methods, …001500).
   service_cash_recorded: number; service_paytm_recorded: number; service_method_unrecorded: number; paytm_recorded_total: number; blockers: string[]; warnings: string[];
+  // day_summary only (…002200): tips (never sales) and Paytm statement total − counter-recorded Paytm (null until entered).
+  tips_cash: number; tips_paytm: number; paytm_difference: number | null;
+  entries_snapshot: { id: string }[];
   allocations: Allocation[]; settlement: Settlement | null;
 };
 

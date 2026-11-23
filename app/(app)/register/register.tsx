@@ -3,14 +3,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { enqueue, listOps, removeOps, exportPending, getMeta, type OutboxRow } from "@/lib/offline/outbox";
 import { withdrawSyncOp, withdrawBlockedOp } from "@/app/(app)/actions";
 import { deviceLabel } from "@/lib/offline/sync";
-import { commissionPool } from "@/lib/accounting";
-import { rupees, parseRupees } from "@/lib/money";
+import { commissionPool, servicePayment, type PayMethod } from "@/lib/accounting";
+import { rupees, parseRupees, parseRupeesAllowZero } from "@/lib/money";
 import { KIND, FLAGS, PAID_BY, isEdited } from "@/lib/labels";
 import { btnPrimary, btnSecondary, input, labelCls } from "@/components/ui";
 
 export type RegisterEntry = {
   id: string; kind: string; amount: number; staff_id: string | null; product_name: string | null; quantity: number | null;
   unit_price: number | null; payment_method: string | null; description: string | null; meal: string | null;
+  split_cash: number | null; split_paytm: number | null; tip_cash: number; tip_paytm: number;
   expense_source: string | null; status: string; version: number; received_at: string; late: boolean;
   timestamp_flags: string[]; business_date: string | null;
 };
@@ -150,9 +151,9 @@ export function Register(props: {
             </div>
           )}
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            {tab === "service" && <ServiceForm staff={staff} onSave={async (sid, amt, method) => {
-              if (await queue("create_entry", crypto.randomUUID(), { kind: "service", staff_id: sid, amount: amt, payment_method: method }))
-                saved(`${rupees(amt)} (${PAID_BY[method]}) saved for ${staffName.get(sid)}.`);
+            {tab === "service" && <ServiceForm staff={staff} onSave={async (sid, pay) => {
+              if (await queue("create_entry", crypto.randomUUID(), { kind: "service", staff_id: sid, ...pay }))
+                saved(`${rupees(Number(pay.amount))} (${payText(pay)}) saved for ${staffName.get(sid)}.`);
             }} />}
             {tab === "product" && <ProductForm products={products} onSave={async (d) => {
               if (await queue("create_entry", crypto.randomUUID(), { kind: "product", ...d })) saved("Product sale saved.");
@@ -346,20 +347,68 @@ function askCorrection(e: RegisterEntry, paid: number): Record<string, unknown> 
   if (amt !== e.amount) d.amount = amt;
   if (e.kind === "service") {
     // Sales recorded before payment methods existed have none: the correction must say how it was paid.
-    const m = askMethod(e.payment_method);
+    const m = askMethod(e.payment_method, true);
     if (m === undefined) return null;
     if (m !== e.payment_method) d.payment_method = m;
+    let sc: number | null = null, sp: number | null = null;
+    if (m === "split") {
+      const c = window.prompt(`Split of ${rupees(amt)}: part paid in cash (₹):`, e.split_cash != null ? String(e.split_cash / 100) : "");
+      if (c == null) return null;
+      sc = parseRupeesAllowZero(c);
+      const u = window.prompt("Part paid by UPI / Paytm / Card (₹):", sc != null && sc <= amt ? String((amt - sc) / 100) : "");
+      if (u == null) return null;
+      sp = parseRupeesAllowZero(u);
+    }
+    const tip = window.prompt("Tip kept by the employee (not a sale). Type C50 for cash, U50 for UPI / Paytm / Card, C20 U30 for both, or leave empty for none:",
+      tipText(e.tip_cash, e.tip_paytm));
+    if (tip == null) return null;
+    const t = parseTip(tip);
+    if (!t) return "Write the tip like C50, U50 or C20 U30, or leave it empty.";
+    const pay = servicePayment({ amount: amt, method: m, splitCash: sc, splitPaytm: sp, tipCash: t.cash, tipPaytm: t.paytm });
+    if (!pay.ok) return pay.error;
+    if (m === "split" && (sc !== e.split_cash || sp !== e.split_paytm || amt !== e.amount || m !== e.payment_method)) {
+      d.split_cash = sc; d.split_paytm = sp;
+    }
+    if (t.cash !== e.tip_cash) d.tip_cash = t.cash;
+    if (t.paytm !== e.tip_paytm) d.tip_paytm = t.paytm;
   }
   return Object.keys(d).length ? d : null;
 }
 
-function askMethod(current: string | null): "cash" | "paytm" | undefined {
+function tipText(cash: number, paytm: number) {
+  return [cash ? `C${cash / 100}` : "", paytm ? `U${paytm / 100}` : ""].filter(Boolean).join(" ");
+}
+
+/** "C20 U30" → paise per channel; empty → none; null if unreadable. */
+function parseTip(v: string): { cash: number; paytm: number } | null {
+  const out = { cash: 0, paytm: 0 };
+  for (const part of v.trim().toUpperCase().split(/\s+/).filter(Boolean)) {
+    const m = /^([CU])(\d{1,7})$/.exec(part);
+    if (!m) return null;
+    out[m[1] === "C" ? "cash" : "paytm"] = Number(m[2]) * 100;
+  }
+  return out;
+}
+
+/** "Cash ₹100 + UPI ₹50 · tip ₹50 (UPI)" for a service payload or entry. */
+function payText(d: Record<string, unknown>) {
+  const m = String(d.payment_method ?? "");
+  const base = m === "split" ? `Cash ${rupees(Number(d.split_cash))} + UPI / Paytm / Card ${rupees(Number(d.split_paytm))}` : PAID_BY[m] ?? "";
+  const tips = [Number(d.tip_cash ?? 0) ? `${rupees(Number(d.tip_cash))} cash` : "", Number(d.tip_paytm ?? 0) ? `${rupees(Number(d.tip_paytm))} UPI` : ""].filter(Boolean);
+  return tips.length ? `${base} · tip ${tips.join(" + ")}` : base;
+}
+
+function askMethod(current: string | null, allowSplit: true): PayMethod | undefined;
+function askMethod(current: string | null): "cash" | "paytm" | undefined;
+function askMethod(current: string | null, allowSplit = false): PayMethod | undefined {
   for (;;) {
-    const v = window.prompt("Paid by? Type C for Cash or U for UPI / Paytm / Card:", current === "paytm" ? "U" : current === "cash" ? "C" : "");
+    const v = window.prompt(`Paid by? Type C for Cash or U for UPI / Paytm / Card${allowSplit ? ", or S for Split (both)" : ""}:`,
+      current === "paytm" ? "U" : current === "cash" ? "C" : current === "split" ? "S" : "");
     if (v == null) return undefined;
     const k = v.trim().toUpperCase();
     if (k === "C") return "cash";
     if (k === "U") return "paytm";
+    if (k === "S" && allowSplit) return "split";
   }
 }
 
@@ -370,7 +419,7 @@ function amountOf(d: Record<string, unknown>) {
 
 function describe(d: Record<string, unknown>, names: Map<string, string>) {
   switch (d.kind) {
-    case "service": return `Service · ${names.get(String(d.staff_id)) ?? "employee"}${d.payment_method ? ` · ${PAID_BY[String(d.payment_method)]}` : ""}`;
+    case "service": return `Service · ${names.get(String(d.staff_id)) ?? "employee"}${d.payment_method ? ` · ${payText(d)}` : ""}`;
     case "product": return `Product · ${d.product_name ?? "item"}${d.quantity ? ` × ${d.quantity}` : ""} · ${d.payment_method === "paytm" ? "Paytm" : "Cash"}`;
     case "expense": return `Expense · ${d.description ?? ""}${d.expense_source === "outside_drawer" ? " (outside drawer)" : ""}`;
     case "zakat": return `Zakat${d.staff_id ? ` · ${names.get(String(d.staff_id)) ?? ""}` : ""}`;
@@ -401,11 +450,26 @@ function Keypad({ value, onChange }: { value: string; onChange: (v: string) => v
   );
 }
 
-function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: string, amount: number, method: "cash" | "paytm") => Promise<void> }) {
+function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: string, pay: Record<string, unknown>) => Promise<void> }) {
   const [sid, setSid] = useState<string | null>(null);
   const [amt, setAmt] = useState("");
-  const [method, setMethod] = useState<"cash" | "paytm" | null>(null);
+  const [method, setMethod] = useState<PayMethod | null>(null);
+  const [splitCash, setSplitCash] = useState("");
+  const [splitPaytm, setSplitPaytm] = useState("");
+  const [tipOpen, setTipOpen] = useState(false);
+  const [tipCash, setTipCash] = useState("");
+  const [tipPaytm, setTipPaytm] = useState("");
   if (!staff.length) return <p className="text-sm text-slate-600">No employees are assigned to this outlet today. Ask the manager.</p>;
+  const amount = parseRupees(amt);
+  const zero = (v: string) => (v.trim() === "" ? 0 : parseRupeesAllowZero(v));
+  const pay = amount && method ? servicePayment({
+    amount, method,
+    splitCash: method === "split" && splitCash.trim() !== "" ? parseRupeesAllowZero(splitCash) : null,
+    splitPaytm: method === "split" && splitPaytm.trim() !== "" ? parseRupeesAllowZero(splitPaytm) : null,
+    tipCash: zero(tipCash), tipPaytm: zero(tipPaytm),
+  }) : null;
+  const badTip = zero(tipCash) == null || zero(tipPaytm) == null;
+  const reset = () => { setAmt(""); setSid(null); setMethod(null); setSplitCash(""); setSplitPaytm(""); setTipOpen(false); setTipCash(""); setTipPaytm(""); };
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <div>
@@ -420,21 +484,49 @@ function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: stri
         </div>
       </div>
       <div>
-        <p className={labelCls}>2. Amount received (after discount)</p>
+        <p className={labelCls}>2. Service amount (after discount, without tip)</p>
         <Keypad value={amt} onChange={setAmt} />
         <fieldset className="mt-3">
           <legend className={labelCls}>3. Paid by</legend>
-          <div className="grid grid-cols-2 gap-2">
-            {(["cash", "paytm"] as const).map((m) => (
+          <div className="grid grid-cols-3 gap-2">
+            {(["cash", "paytm", "split"] as const).map((m) => (
               <button key={m} type="button" aria-pressed={method === m} onClick={() => setMethod(m)}
-                className={`min-h-14 rounded-lg border-2 px-2 text-base font-semibold ${method === m ? "border-brand-700 bg-brand-700 text-white" : "border-slate-300 bg-white"}`}>
-                {method === m && <span aria-hidden="true">✓ </span>}{PAID_BY[m]}
+                className={`min-h-14 rounded-lg border-2 px-1 text-sm font-semibold sm:text-base ${method === m ? "border-brand-700 bg-brand-700 text-white" : "border-slate-300 bg-white"}`}>
+                {method === m && <span aria-hidden="true">✓ </span>}{m === "split" ? "Split" : PAID_BY[m]}
               </button>
             ))}
           </div>
         </fieldset>
-        <button className={`${btnPrimary} mt-3 w-full min-h-14 text-lg`} disabled={!sid || !parseRupees(amt) || !method}
-          onClick={async () => { const p = parseRupees(amt); if (sid && p && method) { await onSave(sid, p, method); setAmt(""); setSid(null); setMethod(null); } }}>
+        {method === "split" && (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div><label htmlFor="split-cash" className={labelCls}>Cash (₹)</label>
+              <input id="split-cash" inputMode="numeric" className={input} value={splitCash} onChange={(e) => setSplitCash(e.target.value)} /></div>
+            <div><label htmlFor="split-paytm" className={labelCls}>UPI / Paytm / Card (₹)</label>
+              <input id="split-paytm" inputMode="numeric" className={input} value={splitPaytm} onChange={(e) => setSplitPaytm(e.target.value)} /></div>
+            <p className={`col-span-2 text-sm ${pay && !pay.ok ? "text-rose-700" : "text-slate-600"}`}>
+              {pay && !pay.ok ? pay.error : `Together ${amount ? rupees(amount) : "the service amount"}.`}
+            </p>
+          </div>
+        )}
+        <div className="mt-3">
+          {!tipOpen ? (
+            <button type="button" className="text-sm font-semibold text-brand-700 underline" onClick={() => setTipOpen(true)}>+ Customer gave a tip</button>
+          ) : (
+            <fieldset className="rounded-lg border border-slate-200 p-2">
+              <legend className="px-1 text-sm font-semibold">Tip for the employee (not a sale, no commission)</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label htmlFor="tip-cash" className={labelCls}>Tip in cash (₹)</label>
+                  <input id="tip-cash" inputMode="numeric" className={input} value={tipCash} onChange={(e) => setTipCash(e.target.value)} /></div>
+                <div><label htmlFor="tip-paytm" className={labelCls}>Tip by UPI / Paytm / Card (₹)</label>
+                  <input id="tip-paytm" inputMode="numeric" className={input} value={tipPaytm} onChange={(e) => setTipPaytm(e.target.value)} /></div>
+              </div>
+              <p className="mt-1 text-xs text-slate-600">Give the tip to the employee now. A UPI / Paytm / Card tip is paid to them in cash from the drawer.</p>
+              {badTip && <p className="text-sm text-rose-700">Enter the tip in whole rupees.</p>}
+            </fieldset>
+          )}
+        </div>
+        <button className={`${btnPrimary} mt-3 w-full min-h-14 text-lg`} disabled={!sid || !pay?.ok || badTip}
+          onClick={async () => { if (sid && pay?.ok && !badTip) { await onSave(sid, pay.data); reset(); } }}>
           {method ? "Save sale" : "Choose how it was paid"}
         </button>
       </div>

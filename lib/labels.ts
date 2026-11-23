@@ -55,7 +55,7 @@ export const KIND: Record<string, string> = {
 };
 
 /** How a service or product sale was paid. UPI and card are settled through Paytm (one channel). */
-export const PAID_BY: Record<string, string> = { cash: "Cash", paytm: "UPI / Paytm / Card" };
+export const PAID_BY: Record<string, string> = { cash: "Cash", paytm: "UPI / Paytm / Card", split: "Split (Cash + UPI / Paytm / Card)" };
 
 /**
  * An entry corrected at least once. Only a correction or a void raises `version` (+1 each, a void at most

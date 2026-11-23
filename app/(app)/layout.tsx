@@ -13,6 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/closing", label: "Closing", show: ctx.can("outlet.read") },
     { href: "/approvals", label: "Approvals", show: ctx.can("closing.approve") },
     { href: "/reports", label: "Reports", show: ctx.can("reports.read") },
+    { href: "/sheet-changes", label: "Sheet changes", show: ctx.can("audit.read") },
     { href: "/staff", label: "Employees", show: ctx.can("staff.manage") },
     { href: "/admin", label: "Admin", show: ctx.can("float.manage") || ctx.can("users.manage") || ctx.can("catalog.manage") },
   ].filter((l) => l.show);
