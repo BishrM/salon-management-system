@@ -202,7 +202,7 @@ export function Register(props: {
               {entries.slice(0, 80).map((e) => (
                 <li key={e.id} className={`flex flex-wrap items-center justify-between gap-2 py-2 text-sm ${e.status === "voided" ? "text-slate-400 line-through" : ""}`}>
                   <span>
-                    <span className="text-slate-500">{new Date(e.received_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>{" "}
+                    <span className="text-slate-500">{new Date(e.received_at).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}</span>{" "}
                     {describe(e as unknown as Record<string, unknown>, staffName)}
                     {e.business_date == null && <span className="ml-1 rounded bg-amber-100 px-1 text-xs text-amber-900">undated</span>}
                     {e.late && <span className="ml-1 rounded bg-amber-100 px-1 text-xs text-amber-900">late</span>}

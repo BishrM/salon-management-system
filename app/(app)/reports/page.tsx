@@ -55,7 +55,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
         />
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card title="Employee sales and commission">
           <Table head={["Employee", "Entries", "Sales", "Commission"]}
             rows={r.employees.map((e) => [e.name, e.entries, rupees(e.sales), rupees(e.commission)])}
@@ -78,7 +78,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
           empty="No closings in this period." />
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card title="Expenses">
           <Table head={["Day", "Time", "Description", "Paid from", "Amount"]}
             rows={r.expenses.map((e) => [e.business_date, fmtTime(e.received_at), e.description + (e.notes ? ` (${e.notes})` : ""), e.expense_source === "cash_drawer" ? "Drawer" : "Outside", rupees(e.amount)])}

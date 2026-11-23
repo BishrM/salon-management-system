@@ -584,6 +584,72 @@ added by the owner.
 | Reopen | shop cannot reopen (403); owner reopens; debt moves to pending (outstanding −₹300 shown as "repaid more than currently owed"); shop changes employee to Arun; rev 2 approved by owner; rev 1 byte-identical (Esha); audit Esha → Arun by shop |
 | Audit | every change recorded with the true login (shop / manager / owner) |
 
-**Not yet done on staging:** the browser walkthrough of the new screens at 375/768 px with the staging logins
-(needs a person to sign in in the browser; the same screens were verified locally); real tablets/offline
-(T7, T11, T20, T21); a commission-rounding case with non-round sales on staging (covered by pgTAP).
+**Browser walkthrough (23 Nov, deployment `e22e8d4`, 375×812 and 768×1024, signed in by the user):**
+| Screen | Login | Result |
+|---|---|---|
+| Register, Employees, Closing list, Closing 23 Nov, Commission statement | Shop/Staff | no page-level sideways scroll at 375 or 768 (wide tables scroll inside their card); attribution card "Arun", food card and final balance −₹300 match the REST run; revisions show Esha → Arun |
+| Approvals, Logins | Shop/Staff | refused ("Not available") |
+| Approvals, Closing list (repayment list with Reverse), Closing 23 Nov, Logins | Owner | no sideways scroll at 375 or 768; history names manager and owner; Logins shows Shop/Staff, Management, Owner and the two retired roles as "(retired, no access)" |
+| Dashboard | both | **page scrolls sideways at 375** (543 px): Employee sales / Recent entries cards widen their grid track. Fine at 768 |
+| Reports | Owner | **page scrolls sideways at 375** (388 px), same cause. Fine at 768 |
+
+**Defects found:**
+1. **W1, Register omits an employee on their last working day.** `register/page.tsx` filters on `staff.active`,
+   but deactivation sets `active = false` immediately with `inactive_from` = tomorrow. On 23 Nov Esha is
+   missing from "Who did the service?" and "Today by employee", her ₹5,000 sale shows as "Service · employee",
+   and the shop cannot record another sale for her that day. Server-side checks and the closing screen are
+   correct (date-aware). Introduced by this release.
+2. **W2, hydration error (React #418) on Register.** `register.tsx:205` formats `received_at` without a time
+   zone (server UTC vs tablet IST). Cosmetic after hydration, but logs an error on every load.
+3. **W3, Dashboard and Reports overflow at 375 px.** Grid children lack `min-w-0` / `grid-cols-1`. Pre-existing.
+4. Minor: the shop login sees "approved by —" in a closing's history (owner/manager names not readable by the
+   shop); "Remove role" buttons on Logins at 768 sit inside the table's scroll area.
+5. Not exercised in the UI: the "Closing done by" column on Approvals (nothing pending) and the repayment
+   form (outstanding ₹0). Both covered by the REST run and pgTAP.
+
+**Not yet done on staging:** fixes for W1–W3 (need a deploy); real tablets/offline (T7, T11, T20, T21); a
+commission-rounding case with non-round sales on staging (covered by pgTAP).
+
+## 19. Fixes for W1–W3 from the staging walkthrough (2026-11-23, local only)
+
+Branch `fix/w1-w3-staging-ui`, based on `1682315` (docs only on top of the deployed `e22e8d4`). No migration,
+no data change, nothing pushed or deployed.
+
+**W1, employee missing from the Register on the deactivation day.**
+- Root cause: `app/(app)/register/page.tsx` kept only `staff.active` rows. Deactivation sets `active = false`
+  at once and `inactive_from` = the next date, so the Register dropped the employee for the rest of that day,
+  although the database (`app.staff_assigned`: `active or date < inactive_from`) still accepted them.
+- Fix: new `lib/staff.ts` `worksOn()` applies the same rule as `app.staff_assigned` to the Register's business
+  date (`today`, which already honours the outlet cutoff); the query now also selects `inactive_from`.
+  Historical records are untouched; the employee name map now includes the employee, so today's sales show
+  their name instead of "employee".
+- Tests: `tests/staff.test.ts` (5: active; earlier dates; whole deactivation date; unavailable from the next
+  date; pre-2026-11-23 deactivation never works). `supabase/tests/13_deactivation_day_register_test.sql`
+  (9: valid before deactivation; valid and a sale accepted through `sync_ops` on the deactivation business
+  date; refused from the next business date; a late offline entry dated to the earlier working day accepted
+  and kept on that day with its employee; commission allocations still name the employee).
+- Known limit, not changed (would need a migration): the trigger dates `inactive_from` from the India
+  calendar date, not the business date. A deactivation between midnight and the 04:00 cutoff therefore keeps
+  the employee for one extra business day. Owner to decide whether this matters.
+
+**W2, React #418 hydration error on the Register.**
+- Root cause: `register.tsx` formatted `received_at` with `toLocaleTimeString` and no time zone, so the server
+  (UTC on Vercel) rendered e.g. "10:51 am" and the tablet (India) "04:21 pm".
+- Fix: the call now passes `timeZone: "Asia/Kolkata"`, the same salon-local zone `fmtTime` uses elsewhere.
+  Stored timestamps unchanged; no suppression.
+- Verified on a local production build served with `TZ=UTC`: server HTML contains "04:21 pm", browser
+  console has no errors on Register load.
+
+**W3, Dashboard and Reports wider than a phone.**
+- Root cause: the content grids (`grid gap-5 lg:grid-cols-2`) had no column template below `lg`, so their
+  implicit `auto` track grew to the tables' `min-w-max` width and pushed the page to 543 / 388 px.
+- Fix: `grid-cols-1` (= `minmax(0, 1fr)`) on those grids in `dashboard/page.tsx` (1) and `reports/page.tsx`
+  (2). Tables keep all columns and scroll inside their card.
+- Verified on the local production build: Dashboard and Reports page width = viewport at 375, 768 and
+  1280 px (two columns at 1280); wide tables scroll inside their cards.
+
+**Test results (this branch):** vitest 76/76 (6 files); pgTAP 500/500 (13 files, local PG17 harness);
+`tsc --noEmit` clean; `eslint` clean; `next build` succeeded.
+
+**Still to do:** approval to push and deploy this branch to staging, then re-check W1–W3 there; real
+tablets/offline (T7, T11, T20, T21).

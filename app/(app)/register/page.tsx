@@ -4,6 +4,7 @@ import { Page, Notice } from "@/components/ui";
 import { Register, type RegisterEntry } from "./register";
 import { LiveRefresh } from "@/components/live-refresh";
 import { foodPaid, type FoodPayment } from "@/lib/accounting";
+import { worksOn } from "@/lib/staff";
 
 export const metadata: Metadata = { title: "Register" };
 
@@ -18,7 +19,7 @@ export default async function RegisterPage() {
     );
   }
   const [{ data: assigned }, { data: products }, { data: entries }, { data: food }, { data: outletRow }] = await Promise.all([
-    supabase.from("staff_assignments").select("staff_id, is_temporary, staff:staff_id(id, full_name, active)")
+    supabase.from("staff_assignments").select("staff_id, is_temporary, staff:staff_id(id, full_name, active, inactive_from)")
       .eq("outlet_id", outlet.id).lte("start_date", today).or(`end_date.is.null,end_date.gte.${today}`),
     supabase.from("product_catalog").select("id, name, default_price").eq("outlet_id", outlet.id).eq("active", true).order("name"),
     supabase.from("entries")
@@ -31,8 +32,8 @@ export default async function RegisterPage() {
 
   const staffMap = new Map<string, { id: string; name: string; temporary: boolean }>();
   for (const a of assigned ?? []) {
-    const s = a.staff as unknown as { id: string; full_name: string; active: boolean } | null;
-    if (s?.active) staffMap.set(s.id, { id: s.id, name: s.full_name, temporary: a.is_temporary });
+    const s = a.staff as unknown as { id: string; full_name: string; active: boolean; inactive_from: string | null } | null;
+    if (s && worksOn(s, today)) staffMap.set(s.id, { id: s.id, name: s.full_name, temporary: a.is_temporary });
   }
   const paidByFood = Object.fromEntries((food ?? []).map((f) => [f.id, foodPaid(f.food_payments as FoodPayment[])]));
   const unpaidFood = (food ?? [])

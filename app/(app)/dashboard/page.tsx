@@ -67,7 +67,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Stat label="Food (from commission)" value={s.food_cost} hint={`Paid from drawer ${rupees(s.food_paid_drawer)}`} />
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card title="Employee sales">
           <Table
             head={["Employee", "Sales", "Commission"]}
