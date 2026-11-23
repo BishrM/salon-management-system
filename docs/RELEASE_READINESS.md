@@ -758,3 +758,71 @@ without page overflow (sheet scrolls inside its box). Screenshots: `docs/screens
 
 **Not tested:** a real tablet; going offline in the browser (offline sync of a split sale is covered by
 pgTAP with an old device time); the staging database.
+
+## 22. Staging release of the Daily Sheet, split payments and tips (2026-11-23 evening IST)
+
+Released commit `fb0e0d8` (branch `feat/daily-sheet-split-payments`: `2eeef49` docs, `af9ca05` feature,
+`8a0ca0a` U5 docs, `fb0e0d8` U6 docs). Branch pushed; `salonops-v1` fast-forwarded `2d62866..fb0e0d8` (no
+force). `main` untouched at `2497647`. No production exists or was touched.
+
+**Pre-checks:** working tree clean; staging had 20 migrations matching local, only `…002100` and `…002200`
+pending. Since §20 staging gained owner test activity (audit 189 → 203, closings 2 → 3, drafts 2 → 3, food
+payments 4 → 5, staff 25 → 26, sync ops 36 → 39 with 3 failed, none pending).
+
+**Backup** (`~/Desktop/Salons/staging-backups/2026-11-24-daily-sheet/`, directory 700, files 600; SHA-256 in
+`SHA256SUMS`): `before-002100_schema.sql`, `before-002100_data.sql` (schemas `public`, `app`,
+`supabase_migrations`), `fingerprint-before.txt`, `fingerprint-restored.txt`, `fingerprint-after.txt`,
+`git-head.txt`. Restore test into a throwaway PostgreSQL 17 database (auth stub, `btree_gist` in
+`extensions`, triggers off for the data load, staging's NOT VALID `rev_closed_by` re-added after it):
+fingerprint of all 20 data tables, sync-op status counts and migration history **identical**. (The restored
+copy reports 96 anon-callable functions only because the schema dump carries no privileges; staging itself
+reports 0.) Both migrations were then rehearsed on the restored copy without error before touching staging.
+
+**Migration:** dry run listed exactly the two files, no seed; `supabase db push` applied them at
+16:50:40–16:50:42 UTC; remote history ends `…002000`, `…002100`, `…002200` (22). Before/after: all 20 data
+tables identical (`entries` compared on its pre-existing columns: same hash `651b…a89f3`; the new
+`tip_cash`/`tip_paytm` are 0 and `split_*` NULL on all 29 old rows); `payment_method` = cash, paytm, split;
+policies 22 → 23 (`sheet_opens_select`); user triggers 48 → 49 (`entries_guard` replaced,
+`sheet_opens_immutable` added), 0 disabled; tables without RLS 0; anon-callable functions 0; definer
+functions without `search_path` 0; authenticated-callable `public` RPCs gained exactly `open_daily_sheet`
+and `sheet_changes`.
+
+**Deployment:** Vercel `dpl_8zWWuUZmU3QeAA8vGJdbVk8DzbtX`, Ready, Production, aliased to
+https://salonops-staging.vercel.app; GitHub commit status of `fb0e0d8` = success, pointing to it (the
+feature-branch preview was cancelled by the Ignored Build Step, as intended).
+
+**Live acceptance — REST as the real staging logins, simulated data on the empty outlet "Staging S4
+(overage)", business date 23 Nov** (Staging Test Salon's 23 Nov was already approved, so it got read-only
+and refusal checks only):
+| Check | Result |
+|---|---|
+| Register (Manager): cash ₹1,000 Arun; Paytm ₹800 Bhavya; split ₹1,500 = ₹1,000 + ₹500 Arun; split ₹1,200 = ₹700 + ₹500 with tips ₹50 cash / ₹30 UPI Chandan; product ₹350 cash; expense ₹100; lunch ₹200; dinner ₹150 | all 8 applied; `day_summary` services ₹4,500, tips ₹50 / ₹30, Register Paytm ₹1,830, service cash ₹2,700 |
+| Invalid split ₹600 + ₹300 for ₹1,000 | refused ("must equal the service amount"), no entry stored; Register UI shows the same message and keeps Save disabled |
+| Open Daily Sheet (Manager, then Owner) | 1 `sheet_opens` row, first opening kept; **no closing created**; again on the approved day: no closing or revision added |
+| After opening: add ₹600 Bhavya, correct ₹800 → ₹900, correct cash → split ₹400 + ₹600, remove the ₹600 | applied; Owner Sheet changes lists added / corrected / corrected / removed with employee totals ₹800 → ₹1,400 → ₹1,500, Arun ₹2,500 → ₹2,500, ₹1,500 → ₹900, actor and reason; reopening the sheet adds no duplicates |
+| Sheet changes for Manager and Shop/Staff | empty list (RPC) |
+| Shop/Staff on S4 (not its outlet) | open sheet, day summary, submit → 403 |
+| Closing draft (Manager): Paytm statement ₹2,500 | Register ₹2,530 vs statement → difference −₹30, `paytm_recorded_mismatch` warning; ₹2,530 → difference ₹0; draft reloads with Paytm, denominations and take-home person |
+| Cash check rev 1 | cash = ₹4,600 + ₹350 − ₹2,530 = ₹2,420 (= cash recorded ₹2,450 − ₹30 UPI tip paid from drawer, U5); ED = ₹2,000 + ₹2,420 − ₹100 = ₹4,320 counted exactly; commission ₹460 (₹250 / ₹90 / ₹120), food ₹350 from commission, payable ₹110 |
+| Submit / approve / reopen | Manager submits rev 1; **Manager reopens** (allowed: `closing.reopen` = owner + manager since `…000300`); correction ₹900 → ₹950 and split ₹1,500 → ₹1,600 on the reopened day applied and listed as notices; statement ₹2,580, recount ₹4,420, rev 2 submitted, Owner approves; rev 1 unchanged (₹4,320 / ₹460), rev 2 ₹4,420 / commission ₹470 (Bhavya ₹95 → ₹90, rounded down to ₹10 per D-26) |
+| Approved day | correction refused ("submitted or approved; ask management to reopen") |
+| Shop/Staff on its own outlet | approve and reopen → 403 (`closing.approve` / `closing.reopen` denied) |
+
+**Browser (deployed build, Owner login already signed in to the pane):** Daily Sheet for S4 23 Nov shows
+employees vertically (Arun ₹1,000 S, ₹1,600 S; Bhavya ₹950; Chandan ₹1,200 S; EDITED tags), Lunch ₹200 /
+Dinner ₹150, Expenses, Product Sale, Rolling ₹4,420 = expected, Accounts in the approved order, Paytm
+recorded ₹2,580, difference ₹0, tips ₹50 / ₹30. Date picker + Open Closing Sheet for 22 Nov: "No closing
+started for this day." Closing page: tips line, statement-vs-counter difference, U5 note, rounding table,
+revisions 1 and 2, history. Sheet changes: 6 notices, newest first. Register, Daily Sheet, Closing day,
+Sheet changes, Closing list: page width ≤ viewport at 375, 768 and 1280 px (sheet scrolls inside its box).
+No application console errors (the only error was the CSP `frame-ancestors 'none'` refusing a test iframe).
+
+**Data left on staging (simulated, S4 only unless stated):** 9 entries (1 removed), closing 23 Nov approved
+at rev 2, `sheet_opens` S4 22 + 23 Nov and Staging Test Salon 23 Nov (from viewing the sheet), 2 failed sync
+ops from the deliberate refusals (devices labelled "DS release test bad split (sim)"). Other outlets'
+entries (29), closings (3) and revisions (3, hash `3669…de6c`) unchanged.
+
+**Not done:** Manager and Shop/Staff **screens** for Sheet changes (checked by RPC only; needs those logins
+signed in); entering a sale through the live Register UI (both staging outlets with a usable day were
+already closed for 23 Nov; saving was checked by REST through the same `sync_ops` path); real tablets,
+offline mode.
