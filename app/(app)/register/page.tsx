@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { requirePermission } from "@/lib/session";
 import { Page, Notice } from "@/components/ui";
-import { Register, type RegisterEntry } from "./register";
+import { Register, type RegisterEntry, type Staff } from "./register";
 import { LiveRefresh } from "@/components/live-refresh";
 import { foodPaid, type FoodPayment } from "@/lib/accounting";
 import { worksOn } from "@/lib/staff";
@@ -18,7 +18,7 @@ export default async function RegisterPage() {
       </Page>
     );
   }
-  const [{ data: assigned }, { data: products }, { data: entries }, { data: food }, { data: outletRow }] = await Promise.all([
+  const [{ data: assigned }, { data: products }, { data: entries }, { data: food }, { data: outletRow }, { data: hiddenRows }] = await Promise.all([
     supabase.from("staff_assignments").select("staff_id, is_temporary, staff:staff_id(id, full_name, active, inactive_from)")
       .eq("outlet_id", outlet.id).lte("start_date", today).or(`end_date.is.null,end_date.gte.${today}`),
     supabase.from("product_catalog").select("id, name, default_price").eq("outlet_id", outlet.id).eq("active", true).order("name"),
@@ -28,12 +28,18 @@ export default async function RegisterPage() {
     supabase.from("entries").select("id, amount, meal, business_date, food_payments(id, amount, reverses_payment_id)")
       .eq("outlet_id", outlet.id).eq("kind", "food").eq("status", "active").gte("business_date", addDays(today, -7)),
     supabase.from("outlets").select("clock_warn_s").eq("id", outlet.id).single(),
+    supabase.from("staff_day_visibility").select("staff_id").eq("outlet_id", outlet.id).eq("business_date", today).eq("hidden", true),
   ]);
 
-  const staffMap = new Map<string, { id: string; name: string; temporary: boolean }>();
+  // Everyone assigned here today, in one of three states: visible (choosable), hidden for today's business
+  // date (still an employee), or deactivated (existing rules; never reactivated from the Register).
+  const hidden = new Set((hiddenRows ?? []).map((h) => h.staff_id));
+  const staffMap = new Map<string, Staff>();
   for (const a of assigned ?? []) {
     const s = a.staff as unknown as { id: string; full_name: string; active: boolean; inactive_from: string | null } | null;
-    if (s && worksOn(s, today)) staffMap.set(s.id, { id: s.id, name: s.full_name, temporary: a.is_temporary });
+    if (!s) continue;
+    const status = !worksOn(s, today) ? "deactivated" : hidden.has(s.id) ? "hidden" : "visible";
+    staffMap.set(s.id, { id: s.id, name: s.full_name, temporary: a.is_temporary, status });
   }
   const paidByFood = Object.fromEntries((food ?? []).map((f) => [f.id, foodPaid(f.food_payments as FoodPayment[])]));
   const unpaidFood = (food ?? [])

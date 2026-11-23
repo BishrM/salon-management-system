@@ -71,7 +71,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Card title="Employee sales">
           <Table
             head={["Employee", "Sales", "Commission"]}
-            rows={s.allocations.map((a) => [a.staff_name, rupees(a.service_total), rupees(a.allocated)])}
+            rows={s.allocations.map((a) => [names.get(a.staff_id) ?? a.staff_name, rupees(a.service_total), rupees(a.allocated)])}
             foot={["Total", rupees(s.service_total), rupees(s.commission_pool)]}
             empty="No service sales yet."
           />

@@ -158,7 +158,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
       <Card title="4. Commission statement" aside={<Link href={`/statement/${date}`} className="text-sm font-semibold text-brand-700 underline">Print</Link>}>
         <Table
           head={["Employee", "Service sales", "Exact 10%", "Allocated (₹10)", "Rounding"]}
-          rows={s.allocations.map((a) => [a.staff_name, rupees(a.service_total), rupees(a.exact_share), rupees(a.allocated), signedRupees(a.rounding_adj)])}
+          rows={s.allocations.map((a) => [(staff ?? []).find((p) => p.id === a.staff_id)?.full_name ?? a.staff_name, rupees(a.service_total), rupees(a.exact_share), rupees(a.allocated), signedRupees(a.rounding_adj)])}
           foot={["Total", rupees(s.service_total), rupees(s.allocations.reduce((x, a) => x + a.exact_share, 0)), rupees(s.commission_pool),
             signedRupees(s.allocations.reduce((x, a) => x + a.rounding_adj, 0))]}
           empty="No service sales."

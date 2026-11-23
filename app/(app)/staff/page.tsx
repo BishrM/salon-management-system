@@ -54,7 +54,7 @@ export default async function StaffPage() {
             <details>
               <summary className="cursor-pointer text-sm font-semibold text-brand-700">Change details or assignment</summary>
               <div className="mt-3 grid gap-4 md:grid-cols-2">
-                <ActionForm action={updateStaff} submit="Save details">
+                <ActionForm action={updateStaff} submit="Save details" className="flex h-full flex-col [&>*:last-child]:mt-auto">
                   <input type="hidden" name="staff" value={s.id} />
                   <div><label className={labelCls} htmlFor={`nm-${s.id}`}>Name</label><input id={`nm-${s.id}`} name="name" defaultValue={s.full_name} className={input} required /></div>
                   <div><label className={labelCls} htmlFor={`ac-${s.id}`}>Status</label>
@@ -63,16 +63,16 @@ export default async function StaffPage() {
                     </select></div>
                   <div><label className={labelCls} htmlFor={`rs-${s.id}`}>Reason</label><input id={`rs-${s.id}`} name="reason" className={input} required /></div>
                 </ActionForm>
-                <ActionForm action={assignStaff} submit="Assign">
+                <ActionForm action={assignStaff} submit="Assign" className="flex h-full flex-col [&>*:last-child]:mt-auto">
                   <input type="hidden" name="staff" value={s.id} />
                   <div><label className={labelCls} htmlFor={`o-${s.id}`}>Outlet</label>
                     <select id={`o-${s.id}`} name="outlet" className={input}>{outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
                   <div className="grid grid-cols-2 gap-2">
-                    <div><label className={labelCls} htmlFor={`as-${s.id}`}>From</label><input id={`as-${s.id}`} name="start" type="date" className={input} required /></div>
-                    <div><label className={labelCls} htmlFor={`ae-${s.id}`}>Until (temporary)</label><input id={`ae-${s.id}`} name="end" type="date" className={input} /></div>
+                    <div className="flex flex-col justify-end"><label className={labelCls} htmlFor={`as-${s.id}`}>From</label><input id={`as-${s.id}`} name="start" type="date" className={input} required /></div>
+                    <div className="flex flex-col justify-end"><label className={labelCls} htmlFor={`ae-${s.id}`}>Until (temporary)</label><input id={`ae-${s.id}`} name="end" type="date" className={input} /></div>
                   </div>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="temporary" value="1" className="h-5 w-5" /> Temporary (visiting another outlet)</label>
                   <div><label className={labelCls} htmlFor={`ar-${s.id}`}>Reason</label><input id={`ar-${s.id}`} name="reason" className={input} required /></div>
+                  <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="temporary" value="1" className="h-5 w-5" /> Temporary (visiting another outlet)</label>
                 </ActionForm>
               </div>
             </details>

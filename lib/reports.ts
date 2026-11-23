@@ -105,9 +105,9 @@ export async function loadReport(supabase: SupabaseClient, outletId: string, fro
   for (const row of rows) {
     if (row.source === "revision") {
       const revId = stateBy.get(row.date)!.current_revision_id;
-      for (const a of (allocs ?? []).filter((x) => x.revision_id === revId)) add(a.staff_id, a.staff_name, a.service_total, a.allocated, 0);
+      for (const a of (allocs ?? []).filter((x) => x.revision_id === revId)) add(a.staff_id, staffName.get(a.staff_id) ?? a.staff_name, a.service_total, a.allocated, 0);
     } else {
-      for (const a of liveAlloc.get(row.date) ?? []) add(a.staff_id, a.staff_name, a.service_total, a.allocated, 0);
+      for (const a of liveAlloc.get(row.date) ?? []) add(a.staff_id, staffName.get(a.staff_id) ?? a.staff_name, a.service_total, a.allocated, 0);
     }
   }
   for (const e of entries ?? []) if (e.kind === "service" && e.staff_id) add(e.staff_id, staffName.get(e.staff_id) ?? "—", 0, 0, 1);

@@ -100,6 +100,18 @@ export async function updateStaff(fd: FormData) {
     (v) => ({ p_staff: v.staff, p_full_name: v.name, p_active: v.active === "true", p_reason: v.reason }), "Employee updated.");
 }
 
+// Register → Service tab: remove an employee for today's business date, or add them back.
+export async function setStaffHidden(fd: FormData) {
+  return rpcAction(z.object({ outlet: uuid, staff: uuid, date, hidden: z.enum(["true", "false"]) }), obj(fd), "set_staff_hidden",
+    (v) => ({ p_outlet: v.outlet, p_staff: v.staff, p_date: v.date, p_hidden: v.hidden === "true" }),
+    fd.get("hidden") === "true" ? "Removed from the Service tab for today." : "Added back to the Service tab.");
+}
+
+export async function renameStaff(fd: FormData) {
+  return rpcAction(z.object({ outlet: uuid, staff: uuid, name: z.string().trim().min(1, "Name is required").max(120, "Name is too long") }),
+    obj(fd), "rename_staff", (v) => ({ p_outlet: v.outlet, p_staff: v.staff, p_full_name: v.name }), "Name saved.");
+}
+
 // Catalogue ------------------------------------------------------------------------------------------
 export async function upsertProduct(fd: FormData) {
   return rpcAction(

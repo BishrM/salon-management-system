@@ -1,7 +1,7 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { enqueue, listOps, removeOps, exportPending, getMeta, type OutboxRow } from "@/lib/offline/outbox";
-import { withdrawSyncOp, withdrawBlockedOp } from "@/app/(app)/actions";
+import { withdrawSyncOp, withdrawBlockedOp, setStaffHidden, renameStaff } from "@/app/(app)/actions";
 import { deviceLabel } from "@/lib/offline/sync";
 import { commissionPool, servicePayment, type PayMethod } from "@/lib/accounting";
 import { rupees, parseRupees, parseRupeesAllowZero } from "@/lib/money";
@@ -15,7 +15,9 @@ export type RegisterEntry = {
   expense_source: string | null; status: string; version: number; received_at: string; late: boolean;
   timestamp_flags: string[]; business_date: string | null;
 };
-type Staff = { id: string; name: string; temporary: boolean };
+/** visible = choosable for new sales; hidden = removed from the Service tab for today's business date only;
+ *  deactivated = existing deactivation rules (listed, never reactivated here). */
+export type Staff = { id: string; name: string; temporary: boolean; status: "visible" | "hidden" | "deactivated" };
 type Product = { id: string; name: string; price: number };
 type UnpaidFood = { id: string; meal: string; date: string; cost: number; unpaid: number };
 type Tab = "service" | "product" | "expense" | "zakat" | "food";
@@ -151,7 +153,7 @@ export function Register(props: {
             </div>
           )}
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            {tab === "service" && <ServiceForm staff={staff} onSave={async (sid, pay) => {
+            {tab === "service" && <ServiceForm staff={staff} outletId={outletId} today={props.today} onSave={async (sid, pay) => {
               if (await queue("create_entry", crypto.randomUUID(), { kind: "service", staff_id: sid, ...pay }))
                 saved(`${rupees(Number(pay.amount))} (${payText(pay)}) saved for ${staffName.get(sid)}.`);
             }} />}
@@ -161,7 +163,7 @@ export function Register(props: {
             {tab === "expense" && <SimpleForm kind="expense" onSave={async (d) => {
               if (await queue("create_entry", crypto.randomUUID(), { kind: "expense", ...d })) saved("Expense saved.");
             }} />}
-            {tab === "zakat" && <SimpleForm kind="zakat" staff={staff} onSave={async (d) => {
+            {tab === "zakat" && <SimpleForm kind="zakat" staff={staff.filter((s) => s.status !== "deactivated")} onSave={async (d) => {
               if (await queue("create_entry", crypto.randomUUID(), { kind: "zakat", ...d })) saved("Zakat saved.");
             }} />}
             {tab === "food" && <FoodForm onSave={async (d) => {
@@ -248,8 +250,8 @@ export function Register(props: {
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="mb-2 font-semibold">Today by employee</h2>
             <ul className="space-y-1">
-              {staff.map((s) => (
-                <li key={s.id} className="flex justify-between text-sm"><span>{s.name}</span><span className="num">{rupees(byStaff.get(s.id) ?? 0)}</span></li>
+              {staff.filter((s) => s.status !== "deactivated" || byStaff.has(s.id)).map((s) => (
+                <li key={s.id} className="flex justify-between text-sm"><span>{s.name}{s.status === "hidden" && <span className="text-slate-500"> (removed today)</span>}</span><span className="num">{rupees(byStaff.get(s.id) ?? 0)}</span></li>
               ))}
             </ul>
             <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 font-semibold"><span>Services</span><span className="num">{rupees(serviceTotal)}</span></div>
@@ -450,8 +452,13 @@ function Keypad({ value, onChange }: { value: string; onChange: (v: string) => v
   );
 }
 
-function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: string, pay: Record<string, unknown>) => Promise<void> }) {
-  const [sid, setSid] = useState<string | null>(null);
+function ServiceForm({ staff, outletId, today, onSave }: {
+  staff: Staff[]; outletId: string; today: string; onSave: (staffId: string, pay: Record<string, unknown>) => Promise<void>;
+}) {
+  const choosable = staff.filter((s) => s.status === "visible");
+  const [picked, setPicked] = useState<string | null>(null);
+  const sid = picked && choosable.some((s) => s.id === picked) ? picked : null;   // removed for today → deselected
+  const setSid = setPicked;
   const [amt, setAmt] = useState("");
   const [method, setMethod] = useState<PayMethod | null>(null);
   const [splitCash, setSplitCash] = useState("");
@@ -474,14 +481,16 @@ function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: stri
     <div className="grid gap-4 md:grid-cols-2">
       <div>
         <p className={labelCls}>1. Who did the service?</p>
+        {!choosable.length && <p className="text-sm text-slate-600">Everyone is removed from the Service tab today. Use Manage employees to add someone back.</p>}
         <div className="grid grid-cols-2 gap-2">
-          {staff.map((s) => (
+          {choosable.map((s) => (
             <button key={s.id} type="button" onClick={() => setSid(s.id)} aria-pressed={sid === s.id}
               className={`min-h-14 rounded-lg border px-2 text-base font-semibold ${sid === s.id ? "border-brand-700 bg-brand-50 text-brand-800" : "border-slate-300 bg-white"}`}>
               {s.name}{s.temporary && <span className="block text-xs font-normal text-slate-500">visiting</span>}
             </button>
           ))}
         </div>
+        <ManageEmployees staff={staff} outletId={outletId} today={today} />
       </div>
       <div>
         <p className={labelCls}>2. Service amount (after discount, without tip)</p>
@@ -499,9 +508,9 @@ function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: stri
         </fieldset>
         {method === "split" && (
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <div><label htmlFor="split-cash" className={labelCls}>Cash (₹)</label>
+            <div className={fieldCell}><label htmlFor="split-cash" className={labelCls}>Cash (₹)</label>
               <input id="split-cash" inputMode="numeric" className={input} value={splitCash} onChange={(e) => setSplitCash(e.target.value)} /></div>
-            <div><label htmlFor="split-paytm" className={labelCls}>UPI / Paytm / Card (₹)</label>
+            <div className={fieldCell}><label htmlFor="split-paytm" className={labelCls}>UPI / Paytm / Card (₹)</label>
               <input id="split-paytm" inputMode="numeric" className={input} value={splitPaytm} onChange={(e) => setSplitPaytm(e.target.value)} /></div>
             <p className={`col-span-2 text-sm ${pay && !pay.ok ? "text-rose-700" : "text-slate-600"}`}>
               {pay && !pay.ok ? pay.error : `Together ${amount ? rupees(amount) : "the service amount"}.`}
@@ -515,9 +524,9 @@ function ServiceForm({ staff, onSave }: { staff: Staff[]; onSave: (staffId: stri
             <fieldset className="rounded-lg border border-slate-200 p-2">
               <legend className="px-1 text-sm font-semibold">Tip for the employee (not a sale, no commission)</legend>
               <div className="grid grid-cols-2 gap-2">
-                <div><label htmlFor="tip-cash" className={labelCls}>Tip in cash (₹)</label>
+                <div className={fieldCell}><label htmlFor="tip-cash" className={labelCls}>Tip in cash (₹)</label>
                   <input id="tip-cash" inputMode="numeric" className={input} value={tipCash} onChange={(e) => setTipCash(e.target.value)} /></div>
-                <div><label htmlFor="tip-paytm" className={labelCls}>Tip by UPI / Paytm / Card (₹)</label>
+                <div className={fieldCell}><label htmlFor="tip-paytm" className={labelCls}>Tip by UPI / Paytm / Card (₹)</label>
                   <input id="tip-paytm" inputMode="numeric" className={input} value={tipPaytm} onChange={(e) => setTipPaytm(e.target.value)} /></div>
               </div>
               <p className="mt-1 text-xs text-slate-600">Give the tip to the employee now. A UPI / Paytm / Card tip is paid to them in cash from the drawer.</p>
@@ -655,5 +664,96 @@ function FoodForm({ onSave }: { onSave: (d: { meal: string; amount: number; pay_
       <p className="sm:col-span-2 text-xs text-slate-500">Food is paid from the employees&apos; commission, not from shop expenses.</p>
       <div className="sm:col-span-2 flex justify-end"><button className={btnPrimary} disabled={!meal || !amount}>Save food</button></div>
     </form>
+  );
+}
+
+/** Grid cell for a labelled field: equal-height cells with the input pinned to the bottom, so inputs line up
+ *  even when one label wraps to two lines. */
+const fieldCell = "flex flex-col justify-end";
+
+const STATUS_TEXT: Record<Staff["status"], { label: string; cls: string }> = {
+  visible: { label: "On the Service tab", cls: "bg-emerald-100 text-emerald-900" },
+  hidden: { label: "Removed for today", cls: "bg-amber-100 text-amber-900" },
+  deactivated: { label: "Deactivated", cls: "bg-slate-200 text-slate-700" },
+};
+
+/** Register → Service → Manage employees: remove for today / add back / rename. Needs a connection (server
+ *  actions); the server re-checks permission, outlet and business date. */
+function ManageEmployees({ staff, outletId, today }: { staff: Staff[]; outletId: string; today: string }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [pending, start] = useTransition();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const run = (id: string, action: (fd: FormData) => Promise<{ ok: boolean; message?: string; error?: string }>, fields: Record<string, string>) => {
+    const fd = new FormData();
+    fd.set("outlet", outletId);
+    fd.set("staff", id);
+    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+    setBusy(id);
+    start(async () => {
+      const r: { ok: boolean; message?: string; error?: string } = await action(fd)
+        .catch(() => ({ ok: false, error: "Could not reach the server. This needs an internet connection." }));
+      setMsg({ ok: r.ok, text: r.ok ? r.message ?? "Saved." : r.error ?? "Could not save." });
+      if (r.ok) setEditing(null);
+      setBusy(null);
+    });
+  };
+  const dateText = new Date(today + "T00:00:00Z").toLocaleDateString("en-IN", { timeZone: "UTC", day: "numeric", month: "short" });
+  return (
+    <>
+      <button type="button" className={`${btnSecondary} mt-2 w-full`} onClick={() => { setMsg(null); setEditing(null); ref.current?.showModal(); }}>
+        Manage employees
+      </button>
+      <dialog ref={ref} aria-labelledby="manage-staff-title"
+        className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-slate-200 p-0 shadow-xl backdrop:bg-slate-900/40">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <h2 id="manage-staff-title" className="text-base font-semibold">Employees on the Service tab · {dateText}</h2>
+          <button type="button" className={`${btnSecondary} min-h-11 px-3`} onClick={() => ref.current?.close()}>Close</button>
+        </div>
+        <p className="px-4 pt-3 text-sm text-slate-600">
+          Removing someone only hides them from new sales today; they come back automatically tomorrow. Their sales,
+          commission and history are not changed.
+        </p>
+        <ul className="divide-y divide-slate-100 px-4">
+          {staff.map((s) => (
+            <li key={s.id} className="py-3">
+              {editing?.id === s.id ? (
+                <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); run(s.id, renameStaff, { name: editing.name }); }}>
+                  <div className="min-w-0 flex-1">
+                    <label htmlFor={`rename-${s.id}`} className={labelCls}>New name</label>
+                    <input id={`rename-${s.id}`} className={input} value={editing.name} maxLength={120} autoFocus required
+                      onChange={(e) => setEditing({ id: s.id, name: e.target.value })} />
+                  </div>
+                  <button className={btnPrimary} disabled={pending || !editing.name.trim()}>{busy === s.id ? "Saving…" : "Save"}</button>
+                  <button type="button" className={btnSecondary} onClick={() => setEditing(null)}>Cancel</button>
+                </form>
+              ) : (
+                <div className="grid gap-2 sm:flex sm:items-center">
+                  <span className="min-w-0 sm:flex-1">
+                    <span className="block break-words font-semibold">{s.name}</span>
+                    <span className={`mt-0.5 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_TEXT[s.status].cls}`}>{STATUS_TEXT[s.status].label}</span>
+                  </span>
+                  <span className="grid grid-cols-2 gap-2 sm:flex">
+                  {s.status === "visible" && (
+                    <button type="button" className={btnSecondary} disabled={pending}
+                      onClick={() => run(s.id, setStaffHidden, { date: today, hidden: "true" })}>{busy === s.id ? "Saving…" : "Remove for today"}</button>
+                  )}
+                  {s.status === "hidden" && (
+                    <button type="button" className={btnPrimary} disabled={pending}
+                      onClick={() => run(s.id, setStaffHidden, { date: today, hidden: "false" })}>{busy === s.id ? "Saving…" : "Add to Service tab"}</button>
+                  )}
+                  <button type="button" className={`${btnSecondary} ${s.status === "deactivated" ? "col-span-2" : ""}`} disabled={pending}
+                    onClick={() => { setMsg(null); setEditing({ id: s.id, name: s.name }); }}>Rename</button>
+                  </span>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+        {msg && <p role={msg.ok ? "status" : "alert"} className={`px-4 pb-3 text-sm ${msg.ok ? "text-emerald-700" : "text-rose-700"}`}>{msg.text}</p>}
+        <p className="border-t border-slate-200 px-4 py-3 text-xs text-slate-500">Deactivated employees can only be changed on the Employees page.</p>
+      </dialog>
+    </>
   );
 }

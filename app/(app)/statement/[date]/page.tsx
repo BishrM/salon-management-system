@@ -27,10 +27,13 @@ export default async function Statement({ params }: { params: Promise<{ date: st
   const { data: recip } = s.closing_id
     ? await supabase.from("commission_handovers").select("recipient_staff_id, staff:recipient_staff_id(full_name)").eq("closing_id", s.closing_id).eq("kind", "handover")
     : { data: [] };
-  const [{ data: rule }, { data: closer }] = await Promise.all([
+  const [{ data: rule }, { data: closer }, { data: people }] = await Promise.all([
     supabase.from("outlets").select("food_rule_v2_from").eq("id", outlet.id).single(),
     s.closed_by_staff_id ? supabase.from("staff").select("full_name").eq("id", s.closed_by_staff_id).single() : Promise.resolve({ data: null }),
+    supabase.from("staff").select("id, full_name").in("id", alloc.map((a) => a.staff_id)),
   ]);
+  // Current name by id: a later rename shows here; the frozen revision keeps its own snapshot untouched.
+  const nameOf = (a: { staff_id: string; staff_name: string }) => people?.find((p) => p.id === a.staff_id)?.full_name ?? a.staff_name;
   const revisedFood = !!rule?.food_rule_v2_from && date >= rule.food_rule_v2_from;
   const finalBalance = s.commission_pool - (s.food_cost - s.food_breakfast_salon);
   const recipients = [...new Set((recip ?? []).map((r) => (r.staff as unknown as { full_name: string } | null)?.full_name).filter(Boolean))];
@@ -48,7 +51,7 @@ export default async function Statement({ params }: { params: Promise<{ date: st
         </div>
         <Table
           head={["Employee", "Service sales", "Exact 10%", "Commission (₹10)", "Rounding"]}
-          rows={alloc.map((a) => [a.staff_name, rupees(a.service_total), rupees(a.exact_share), rupees(a.allocated), signedRupees(a.rounding_adj)])}
+          rows={alloc.map((a) => [nameOf(a), rupees(a.service_total), rupees(a.exact_share), rupees(a.allocated), signedRupees(a.rounding_adj)])}
           foot={["Total", rupees(s.service_total), rupees(alloc.reduce((x, a) => x + a.exact_share, 0)), rupees(s.commission_pool),
             signedRupees(alloc.reduce((x, a) => x + a.rounding_adj, 0))]}
           empty="No service sales on this day."

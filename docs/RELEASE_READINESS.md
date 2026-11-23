@@ -826,3 +826,45 @@ entries (29), closings (3) and revisions (3, hash `3669…de6c`) unchanged.
 signed in); entering a sale through the live Register UI (both staging outlets with a usable day were
 already closed for 23 Nov; saving was checked by REST through the same `sync_ops` path); real tablets,
 offline mode.
+
+## 23. Service tab employee management (2026-11-24, local only)
+
+Branch `feat/service-tab-employees` (from `7887bde`). Not pushed, not deployed; staging is unchanged at
+`fb0e0d8`. Decision D-33.
+
+**Migration `20261124002300_service_tab_employees.sql`** (forward-only, changes no existing row):
+`public.staff_day_visibility` (one row per outlet, employee and business date; unique; RLS select for
+members; no delete; audited by `app.audit_row`); `app.staff_hidden_at()`; trigger `entries_hidden_staff`
+(BEFORE INSERT OR UPDATE OF staff_id on `entries`) refusing a new service sale, or a correction that moves a
+sale, to an employee hidden on that business date (offline sales judged by device time + offset);
+`public.set_staff_hidden(outlet, staff, date, hidden)` (`staff.manage`, current business date only, active
+assigned employees only, no-op writes nothing); `public.rename_staff(outlet, staff, name)` (`staff.manage`,
+employee must belong to the outlet, same 1–120 rule as `update_staff`, unchanged name writes nothing).
+Authenticated RPC allow-list gains `set_staff_hidden` and `rename_staff`.
+
+**App.** Register → Service: hidden employees leave the chooser; a full-width **Manage employees** button
+under it opens a native `<dialog>` listing everyone assigned today with status (On the Service tab / Removed
+for today / Deactivated) and Remove for today / Add to Service tab / Rename (inline Save / Cancel). "Today
+by employee" keeps hidden employees with their totals ("removed today"). Names of frozen revision
+allocations now resolve by `staff_id` on Dashboard, Closing day, Commission statement and Reports (the
+snapshot column is not rewritten). Alignment: split and tip inputs are pinned to the bottom of equal-height
+cells (labels of different length had pushed one input ~16 px lower at 375 / 768 px); on the Employees page
+the two forms in "Change details or assignment" line up row by row with both submit buttons on one line.
+
+**Tests (local).** pgTAP 628/628 on both `supabase test db` (Docker) and the PG17 harness from a clean
+database (new `16_service_tab_employees_test.sql`, 56: visible/hidden selection, Shop/Staff and Owner hide,
+server refusal on every write path, totals and commission unchanged, corrections and removal of a hidden
+employee's sale, offline before/after the hide and idempotent resend, no duplicate rows or audit rows, add
+back, next business date, past/future dates refused, 03:59 vs cutoff, deactivation unaffected and not
+reactivatable, outlet authorisation, rename keeps id/history/allocations, audit contents).
+`scripts/test-concurrency.sh` 13/13. vitest 94/94. `tsc`, `eslint`, `next build` clean.
+Local production server (port 3001, seed Owner): removed Arun (₹15,200 sales) → gone from the chooser,
+still in Today by employee, Daily Sheet, closing and commission (pool ₹1,530 unchanged), his entries still
+correctable; renamed Bhavya → "Bhavya R" → shown on Register, Daily Sheet, Closing, Dashboard, Reports and
+the approved 20 Nov statement/closing (snapshot still "Bhavya"); added back; audit one row per action.
+375 / 768 / 1280 px: no page overflow, dialog fits, buttons ≥ 44 px, no console errors. Local data restored
+(names and visibility). Screenshots: `docs/screenshots/service-tab-{375,1280}.jpg`,
+`manage-employees-{375,1280}.jpg`.
+
+**Not tested:** staging; a real tablet; a deactivated employee in the panel on screen (covered by pgTAP;
+the local seed has none).
