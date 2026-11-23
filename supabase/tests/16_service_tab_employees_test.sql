@@ -123,16 +123,16 @@ select is((select count(*) from public.staff_day_visibility where staff_id = tes
   'no row for an employee never hidden');
 
 -- 15. Audit: one row per real change, with employee, name at the time, outlet, date, hidden/restored, actor, time.
-select is((select count(*) from public.audit_logs where table_name = 'staff_day_visibility'), 3::bigint,
+select is((select count(*) from public.audit_logs where table_name = 'staff_day_visibility' and outlet_id = tests.outlet('A')), 3::bigint,
   'three audit rows: hide B, hide C, add back B (no-ops wrote none)');
 select is((select row(outlet_id, actor, new_data ->> 'staff_id', new_data ->> 'staff_name', new_data ->> 'business_date',
                       new_data ->> 'hidden', reason)::text
-             from public.audit_logs where table_name = 'staff_day_visibility' and action = 'INSERT'
+             from public.audit_logs where table_name = 'staff_day_visibility' and outlet_id = tests.outlet('A') and action = 'INSERT'
               and new_data ->> 'staff_id' = tests.staff('B')::text),
   row(tests.outlet('A'), tests.uid('head'), tests.staff('B')::text, 'Bilal', pg_temp.today()::text, 'true',
       'Removed from the Service tab for the day')::text, 'hide audit row complete');
 select is((select row(action, actor, old_data ->> 'hidden', new_data ->> 'hidden')::text
-             from public.audit_logs where table_name = 'staff_day_visibility' and action = 'UPDATE'),
+             from public.audit_logs where table_name = 'staff_day_visibility' and outlet_id = tests.outlet('A') and action = 'UPDATE'),
   row('UPDATE', tests.uid('owner'), 'true', 'false')::text, 'add-back audit row (owner, hidden → shown)');
 
 -- 6 + 18. Visibility is per business date; tomorrow B and C are selectable by default. Only today can be changed.

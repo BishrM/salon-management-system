@@ -101,6 +101,12 @@ export async function updateStaff(fd: FormData) {
 }
 
 // Register → Service tab: remove an employee for today's business date, or add them back.
+/** Owner only, and only for an employee with no history (enforced by delete_staff_permanently). */
+export async function deleteStaffPermanently(fd: FormData) {
+  return rpcAction(z.object({ outlet: uuid, staff: uuid }), obj(fd), "delete_staff_permanently",
+    (v) => ({ p_outlet: v.outlet, p_staff: v.staff }), "Employee deleted permanently.");
+}
+
 export async function setStaffHidden(fd: FormData) {
   return rpcAction(z.object({ outlet: uuid, staff: uuid, date, hidden: z.enum(["true", "false"]) }), obj(fd), "set_staff_hidden",
     (v) => ({ p_outlet: v.outlet, p_staff: v.staff, p_date: v.date, p_hidden: v.hidden === "true" }),

@@ -39,7 +39,8 @@ select set_eq(
         'record_top_up','change_required_float','reverse_float_movement','record_handover',
         'record_commission_return','accept_commission_overpayment','import_paytm_transactions',
         'closing_employees','set_closing_employee','food_debt_summary','record_food_repayment',
-        'reverse_food_repayment','open_daily_sheet','sheet_changes','set_staff_hidden','rename_staff'],
+        'reverse_food_repayment','open_daily_sheet','sheet_changes','set_staff_hidden','rename_staff',
+        'staff_delete_blockers','delete_staff_permanently'],
   'authenticated can execute exactly the RPC allow-list');
 
 select ok(not has_function_privilege('authenticated', 'app.bootstrap_outlet(text,text,uuid)', 'EXECUTE'),
