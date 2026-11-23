@@ -671,3 +671,53 @@ width ≤ viewport at 375, 768 and 1280 px, two columns at 1280.
 
 **Still to do:** approval to push and deploy this branch to staging, then re-check W1–W3 there; real
 tablets/offline (T7, T11, T20, T21).
+
+## 20. Staging release of W1–W3 and the deactivation business-date fix (2026-11-23)
+
+Released commit `2d62866` (branch `fix/w1-w3-staging-ui`: `1682315` docs, `45df464` W1–W3,
+`2d62866` deactivation business date). `salonops-v1` fast-forwarded `e22e8d4..2d62866` (no force);
+`fix/w1-w3-staging-ui` pushed. `main` untouched at `2497647`. No production exists or was touched.
+
+**Targets confirmed:** Supabase `salonops-staging` (`nzwmfoixqffwqzntvscn`, ap-south-1, PG 17.12, linked);
+Vercel project `salonops-staging` (`prj_Vlks4oMrQyZZZ0GAUjO3NXadL8K0`).
+
+**Pre-checks:** working tree clean; server sync ops 36 (35 applied, 1 failed: the earlier resolved one),
+none pending; the migration only replaces trigger logic, so queued ops are unaffected.
+
+**Backup** (`~/Desktop/Salons/staging-backups/2026-11-23-w1/`, directory 700, files 600; SHA-256 in
+`SHA256SUMS`): `before-002000_schema.sql`, `before-002000_data.sql` (schemas `public`, `app`,
+`supabase_migrations`), `fingerprint-before.txt`, `fingerprint-restored.txt`, `fingerprint-after.txt`,
+`git-head.txt`. Restore test: throwaway PostgreSQL 17 database (auth stub, triggers off for the data load,
+the staging-only NOT VALID `rev_closed_by` CHECK re-added after the load as on staging) reproduced the
+fingerprint of all 20 data tables, the sync-op status counts and the migration history **identically**.
+Auth users are not in this backup.
+
+**Migration:** dry run listed exactly `20261123002000_deactivation_business_date.sql`, no seed;
+`supabase db push` applied it at 13:34:45 UTC; remote history now ends `…001900`, `…002000` (20).
+Before/after: all 20 data tables identical (audit_logs 189, closing_drafts 2, closing_events 7,
+closing_revisions 3, commission_handovers 0, daily_closings 2, entries 29, float_movements 6,
+food_payments 4, food_repayments 2, late_entry_reviews 0, outlet_memberships 26, outlets 7,
+paytm_transactions 0, profiles 6, revision_commission_allocations 6, revision_denominations 9, staff 25,
+staff_assignments 25, sync_ops 36); policies 22, user triggers 48 (0 disabled), tables without RLS 0,
+anon-callable functions 0, definer functions without `search_path` 0, all unchanged. On staging,
+`app.staff_inactive_from_at` for Esha S (sim) gives 24 Nov for 01:00 on 24 Nov and 25 Nov for 04:00.
+
+**Deployment:** Vercel `dpl_128XagAPMJYA7FaYqdncGuJDZEu6`, Ready, Production, aliased to
+https://salonops-staging.vercel.app; GitHub commit status of `2d62866` points to it (the preview build of
+the feature branch was cancelled by the Ignored Build Step, as intended).
+
+**Live acceptance (simulated data only, nothing created or changed):**
+| Check | Result |
+|---|---|
+| Shop/Staff, owner, manager sign in | all authenticate (REST); Shop/Staff and owner also on screen (signed in by the user) |
+| W1: Register on business date 23 Nov | Esha S (sim) (inactive from 24 Nov) in the employee chooser and "Today by employee" (₹5,000); her entry reads "Service · Esha S (sim) · UPI / Paytm / Card" |
+| W1 edge case | live function: 01:00 → 24 Nov, 04:00 → 25 Nov. A real deactivation between 00:00 and 04:00 was not performed (would need that hour and a data change) |
+| Historical attribution | `day_summary` 23 Nov and the closing's commission statement name Esha S (sim) ₹5,000 → ₹500; revision history "Closing done by Esha S (sim)"; Employees: "deactivated from Tue, 24 Nov, 2026" |
+| W2 | server HTML of `/register` shows "04:53 pm" (India time from the UTC server); no console errors (no #418) |
+| W3 | Dashboard (Shop/Staff and owner) and Reports (owner): page width ≤ viewport at 375, 768 and 1280 px; two columns at 1280 |
+| Closing / food screens | Closing 23 Nov renders (approved, rev 2, food ₹2,100: breakfast ₹300, lunch+dinner ₹1,800, ₹300 owed); Approvals "Nothing waiting" |
+| Repayment history | owed ₹300, repaid ₹300 (₹200 cash "race A"; ₹100 cash "simulated partial", Esha S (sim), Arun), still owed ₹0 |
+| Service worker | `/sw.js` controls the page, cache `salonops-v3` holds the app pages and 15 build assets; Register "0 waiting to sync · 0 problem(s)". Offline mode itself not simulated (the pane cannot cut the network) |
+
+**Not done:** real-tablet tests T7, T11, T20, T21; a live deactivation inside the 00:00–04:00 window.
+Open owner decisions U1–U4 (DECISIONS.md) are unchanged.
