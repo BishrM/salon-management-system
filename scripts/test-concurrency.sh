@@ -97,4 +97,11 @@ q -c "$(as 1) select public.approve_closing('$REV2', '{}')" >/dev/null
 check "today approved (committed)" "$(q -c "select state from closing_state where closing_id='$C2'")" approved
 check "audit trail has the approval" "$(q -c "select count(*) from audit_logs where table_name='closing_events' and new_data->>'type'='approved'")" 2
 
+# 6. Concurrent food repayments for the whole outstanding amount: the outlet row lock lets only one through.
+check "today's ₹20 food owed is outstanding after approval" "$(q -c "select (app.food_debt('$O')).owed - (app.food_debt('$O')).repaid")" 2000
+for _ in 1 2; do
+  q -c "$(as 1) begin; select public.record_food_repayment('$O', 2000, 'cash', '$T', '{}', null); select pg_sleep(1); commit;" >/dev/null 2>&1 &
+done; wait || true
+check "concurrent repayments cannot exceed the outstanding amount" "$(q -c "select count(*)||':'||sum(amount) from food_repayments where outlet_id='$O'")" "1:2000"
+
 exit $fail
