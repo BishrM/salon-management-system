@@ -725,7 +725,7 @@ Open owner decisions U1–U4 (DECISIONS.md) are unchanged.
 ## 21. Daily Sheet, split payments and tips (2026-11-24, local only)
 
 Branch `feat/daily-sheet-split-payments` from `2eeef49`. **Not pushed, not deployed; staging and production
-unchanged.** Decision record: D-32; U5 (tip cash handling) confirmed by the owner on 2026-11-24; open question U6 (notification scope).
+unchanged.** Decision record: D-32; U5 (tip cash handling) and U6 (notification scope) approved by the owner on 2026-11-24; the feature scope is fully decided.
 
 **Migrations (forward only, no existing row changed).**
 - `20261124002100_payment_method_split.sql`: adds the enum value `payment_method = 'split'` (own file: a new
