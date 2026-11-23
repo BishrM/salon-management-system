@@ -9,7 +9,7 @@ import type { DaySummary } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Commission statement" };
 
-// Printable statement for the head employee (SRS §3.2, Rev 6 §5.1/§5.8, J3).
+// Printable commission statement for the employees (SRS §3.2, Rev 6 §5.1/§5.8, J3; food per D-31).
 export default async function Statement({ params }: { params: Promise<{ date: string }> }) {
   const { date } = await params;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
@@ -27,6 +27,12 @@ export default async function Statement({ params }: { params: Promise<{ date: st
   const { data: recip } = s.closing_id
     ? await supabase.from("commission_handovers").select("recipient_staff_id, staff:recipient_staff_id(full_name)").eq("closing_id", s.closing_id).eq("kind", "handover")
     : { data: [] };
+  const [{ data: rule }, { data: closer }] = await Promise.all([
+    supabase.from("outlets").select("food_rule_v2_from").eq("id", outlet.id).single(),
+    s.closed_by_staff_id ? supabase.from("staff").select("full_name").eq("id", s.closed_by_staff_id).single() : Promise.resolve({ data: null }),
+  ]);
+  const revisedFood = !!rule?.food_rule_v2_from && date >= rule.food_rule_v2_from;
+  const finalBalance = s.commission_pool - (s.food_cost - s.food_breakfast_salon);
   const recipients = [...new Set((recip ?? []).map((r) => (r.staff as unknown as { full_name: string } | null)?.full_name).filter(Boolean))];
   const st = s.settlement;
 
@@ -50,10 +56,15 @@ export default async function Statement({ params }: { params: Promise<{ date: st
         <div className="mt-5 max-w-md">
           <Row label="Commission pool" value={rupees(s.commission_pool)} />
           <Row label="Food cost" value={rupees(s.food_cost)} />
-          <Row sub label="paid from commission" value={`− ${rupees(s.food_commission_funded)}`} />
-          {s.food_shop_funded > 0 && <Row sub label="paid by the shop" value={rupees(s.food_shop_funded)} />}
+          {revisedFood && <Row sub label="breakfast — salon expense" value={rupees(s.food_breakfast_salon)} />}
+          {revisedFood && <Row sub label="lunch and dinner" value={rupees(s.food_cost - s.food_breakfast_salon)} />}
+          <Row sub label="deducted from commission" value={`− ${rupees(s.food_commission_funded)}`} />
+          {!revisedFood && s.food_shop_funded > 0 && <Row sub label="paid by the shop" value={rupees(s.food_shop_funded)} />}
+          {s.food_employee_owed > 0 && <Row sub label="not covered by commission — owed to the salon" value={rupees(s.food_employee_owed)} />}
           <Row sub label="food not yet paid from drawer" value={rupees(s.food_not_paid_drawer)} />
           <Row strong label="Remaining commission cash" value={rupees(s.remaining_payable)} />
+          {revisedFood && <Row strong label="Final balance" value={finalBalance > 0 ? `${rupees(finalBalance)} commission left`
+            : finalBalance === 0 ? "₹0 — commission fully used for food" : `− ${rupees(-finalBalance)} owed to the salon`} />}
           {st && <>
             <Row label="Handed from drawer" value={rupees(st.drawer_net)} />
             <Row label="Handed outside drawer" value={rupees(st.handed_outside_drawer)} />
@@ -63,13 +74,14 @@ export default async function Statement({ params }: { params: Promise<{ date: st
             {st.accepted_overpayment > 0 && <Row label="Accepted overpayment" value={rupees(st.accepted_overpayment)} />}
             <Row strong label="Distribution status" value={SETTLEMENT[st.status] ?? st.status} />
           </>}
-          <Row label="Recipient (head employee)" value={recipients.join(", ") || "—"} />
+          <Row label="Commission handed to" value={recipients.join(", ") || "—"} />
+          <Row label="Closing done by" value={closer?.full_name ?? "—"} />
         </div>
         <p className="mt-5 text-xs text-slate-500">
           Pool is 10% of total service sales rounded down to ₹10; individual amounts are rounded to ₹10 by largest remainder so they add up to the pool.
         </p>
         <div className="mt-10 grid grid-cols-2 gap-10 text-sm">
-          <div className="border-t border-slate-400 pt-1">Head employee signature</div>
+          <div className="border-t border-slate-400 pt-1">Received by (employee) signature</div>
           <div className="border-t border-slate-400 pt-1">Manager signature</div>
         </div>
       </div>

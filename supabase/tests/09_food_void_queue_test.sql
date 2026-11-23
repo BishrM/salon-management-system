@@ -59,7 +59,7 @@ select is((select count(*)::int from public.sync_ops where device_id = pg_temp.i
   'blocked op is not stored (the device keeps it)');
 
 -- 4. Withdrawing the failed op: only by the person who sent it, with a reason -----------------------------
-select tests.login_as('head');
+select tests.login_as('manager');
 select throws_ok(format($$ select public.withdraw_sync_op(%L, 'not mine') $$, pg_temp.r('blocked') ->> 'blocked_by'),
   '42501', null, 'another user cannot withdraw the op');
 reset role;

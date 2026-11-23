@@ -15,7 +15,9 @@ create function tests.uid(p_name text) returns uuid language sql immutable as $$
     when 'owner'    then 'a0000000-0000-4000-8000-000000000001'
     when 'manager'  then 'a0000000-0000-4000-8000-000000000002'
     when 'head'     then 'a0000000-0000-4000-8000-000000000003'
-    when 'counter'  then 'a0000000-0000-4000-8000-000000000004'
+    -- Since 001700 the outlet has ONE shared Shop/Staff login: 'counter' is the same login as 'head'
+    -- (names kept so older scenarios read as before). 'counter2' keeps a legacy counter role.
+    when 'counter'  then 'a0000000-0000-4000-8000-000000000003'
     when 'counter2' then 'a0000000-0000-4000-8000-000000000005'
     when 'outsider' then 'a0000000-0000-4000-8000-000000000006'
     when 'nobody'   then 'a0000000-0000-4000-8000-000000000007'
@@ -40,17 +42,16 @@ begin
 end;
 $$;
 
--- Fixture: outlet A with owner, manager, head, counter, counter2; outlet B owned by outsider;
--- "nobody" has a login but no membership.
+-- Fixture: outlet A with owner, manager, the Shop/Staff login ('head' = 'counter') and counter2 (legacy
+-- counter role, grants nothing); outlet B owned by outsider; "nobody" has a login but no membership.
 create function tests.fixture() returns void language plpgsql as $$
 begin
-  perform tests.create_user(n) from unnest(array['owner','manager','head','counter','counter2','outsider','nobody','owner2']) n;
+  perform tests.create_user(n) from unnest(array['owner','manager','head','counter2','outsider','nobody','owner2']) n;
   insert into public.outlets (id, name) values (tests.outlet('A'), 'Outlet A'), (tests.outlet('B'), 'Outlet B');
   insert into public.outlet_memberships (outlet_id, profile_id, role, granted_by, reason) values
     (tests.outlet('A'), tests.uid('owner'),    'owner',   null,               'fixture'),
     (tests.outlet('A'), tests.uid('manager'),  'manager', tests.uid('owner'), 'fixture'),
-    (tests.outlet('A'), tests.uid('head'),     'head',    tests.uid('owner'), 'fixture'),
-    (tests.outlet('A'), tests.uid('counter'),  'counter', tests.uid('owner'), 'fixture'),
+    (tests.outlet('A'), tests.uid('head'),     'shop',    tests.uid('owner'), 'fixture'),
     (tests.outlet('A'), tests.uid('counter2'), 'counter', tests.uid('owner'), 'fixture'),
     (tests.outlet('B'), tests.uid('outsider'), 'owner',   null,               'fixture');
 end;
@@ -133,7 +134,7 @@ begin
     case when p_kind = 'product' then p_rupees * 100 end,
     case when p_kind = 'product' then coalesce(p_extra ->> 'payment_method', 'cash')::public.payment_method end,
     case when p_kind = 'expense' then coalesce(p_extra ->> 'expense_source', 'cash_drawer')::public.expense_source end,
-    case when p_kind = 'food' then 'lunch'::public.meal end,
+    case when p_kind = 'food' then coalesce(p_extra ->> 'meal', 'lunch')::public.meal end,
     case when p_kind = 'expense' then 'supplies' end,
     tests.uid('counter'), gen_random_uuid(), p_date, 'online');
   return v_id;

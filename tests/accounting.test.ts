@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commissionPool, allocateCommission, cashModel, foodPaid, type CashInput } from "@/lib/accounting";
+import { commissionPool, allocateCommission, cashModel, foodPaid, foodSplit, type CashInput } from "@/lib/accounting";
 import { rupees, signedRupees, parseRupees } from "@/lib/money";
 
 const R = (r: number) => r * 100; // rupees → paise
@@ -111,5 +111,25 @@ describe("foodPaid", () => {
       { id: "r", amount: R(200), reverses_payment_id: "a" },
     ];
     expect(foodPaid(p)).toEqual({ paid: R(100), activeIds: ["b"] });
+  });
+});
+
+// Revised food rule (D-31): same worked examples as supabase/tests/12. Amounts in paise.
+describe("foodSplit (breakfast salon-funded, lunch/dinner from commission)", () => {
+  it("commission above lunch/dinner leaves commission", () => {
+    expect(foodSplit(180000, 30000, 200000)).toEqual({
+      salonFunded: 30000, lunchDinner: 150000, fromCommission: 150000, owedToSalon: 0, commissionLeft: 50000, finalBalance: 50000,
+    });
+  });
+  it("client example: breakfast ₹300, lunch+dinner ₹1,500, commission ₹1,500 → nothing owed", () => {
+    const f = foodSplit(180000, 30000, 150000);
+    expect([f.fromCommission, f.owedToSalon, f.finalBalance]).toEqual([150000, 0, 0]);
+  });
+  it("lunch/dinner ₹1,800 vs commission ₹1,500 → ₹1,500 deducted, ₹300 owed, balance −₹300", () => {
+    const f = foodSplit(180000, 0, 150000);
+    expect([f.fromCommission, f.owedToSalon, f.commissionLeft, f.finalBalance]).toEqual([150000, 30000, 0, -30000]);
+  });
+  it("breakfast alone never touches commission", () => {
+    expect(foodSplit(30000, 30000, 0)).toMatchObject({ fromCommission: 0, owedToSalon: 0, finalBalance: 0 });
   });
 });

@@ -62,6 +62,25 @@ export function cashModel(i: CashInput) {
   };
 }
 
+/**
+ * Revised food rule (D-31, from outlets.food_rule_v2_from): breakfast is a salon expense; lunch and dinner
+ * are paid from the commission pool up to C; any rest is owed to the salon by the employees.
+ * finalBalance = C − (lunch + dinner): positive = commission left, 0 = fully used, negative = owed.
+ * Mirrors the food block of app.compute_day.
+ */
+export function foodSplit(food: number, breakfast: number, pool: number) {
+  const lunchDinner = food - breakfast;
+  const fromCommission = Math.min(lunchDinner, pool);
+  return {
+    salonFunded: breakfast,
+    lunchDinner,
+    fromCommission,
+    owedToSalon: lunchDinner - fromCommission,
+    commissionLeft: pool - fromCommission,
+    finalBalance: pool - lunchDinner,
+  };
+}
+
 export type FoodPayment = { id: string; amount: number; reverses_payment_id: string | null };
 
 /** Net paid on a food entry and the payments not yet reversed (a reversal row points at its original). */

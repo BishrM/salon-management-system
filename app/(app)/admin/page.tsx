@@ -32,7 +32,7 @@ export default async function Admin() {
     { href: "/admin/setup", label: "Outlet settings", show: can("outlet.denominations") },
     { href: "/admin/catalog", label: "Product catalogue", show: can("catalog.manage") },
     { href: "/admin/float", label: "Cash float", show: can("float.manage") },
-    { href: "/admin/users", label: "Users and acting head", show: can("delegation.manage") },
+    { href: "/admin/users", label: "Logins", show: can("members.read") },
     { href: "/admin/review", label: `Undated entries & sync issues${(unassigned ?? 0) + (issues ?? 0) ? ` (${(unassigned ?? 0) + (issues ?? 0)})` : ""}`, show: can("date.assign") },
     { href: "/admin/paytm", label: "Paytm import", show: can("paytm.enter") },
     { href: "/admin/audit", label: "Audit history", show: can("audit.read") },

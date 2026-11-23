@@ -190,6 +190,7 @@ create temp table cl (id uuid);
 grant select, insert on cl to authenticated;
 select tests.login_as('head');
 insert into cl select (public.prepare_closing(tests.outlet('A'), (select today from d)) ->> 'closing_id')::uuid;
+select public.set_closing_employee((select id from cl), tests.staff('A'));
 select ok((public.update_draft((select id from cl), 100000, null, null, '{"50000":4}', 'test', 'Owner') -> 'warnings') ? 'paytm_recorded_mismatch'
   = false, 'update_draft (closing engine) is unchanged by the recorded split');
 select ok((select (s -> 'warnings') ? 'paytm_recorded_mismatch' from public.day_summary(tests.outlet('A'), (select today from d)) s),

@@ -9,37 +9,31 @@ export const metadata: Metadata = { title: "Employees" };
 export default async function StaffPage() {
   const ctx = await requirePermission("staff.manage");
   const { supabase, outlet, today, outlets } = ctx;
-  const [{ data: staff }, { data: members }] = await Promise.all([
-    supabase.from("staff").select("id, full_name, active, profile_id, staff_assignments(id, outlet_id, start_date, end_date, end_reason, is_temporary)").order("full_name"),
-    supabase.from("outlet_memberships").select("profile_id, role, profiles:profile_id(full_name)").eq("outlet_id", outlet.id).is("revoked_at", null).eq("is_acting", false),
-  ]);
+  const { data: staff } = await supabase.from("staff")
+    .select("id, full_name, active, inactive_from, staff_assignments(id, outlet_id, start_date, end_date, end_reason, is_temporary)")
+    .order("full_name");
   const outletName = (id: string) => outlets.find((o) => o.id === id)?.name ?? "another outlet";
-  const linked = new Set((staff ?? []).map((s) => s.profile_id).filter(Boolean));
+  // Active first; deactivated employees stay listed (history, reactivation) but are never deleted.
+  const ordered = [...(staff ?? [])].sort((a, b) => Number(b.active) - Number(a.active));
 
   return (
     <Page title="Employees">
       <Card title="Add employee">
         <ActionForm action={createStaff} submit="Add employee">
           <input type="hidden" name="outlet" value={outlet.id} />
-          <div className="grid gap-3 sm:grid-cols-3">
+          <p className="text-sm text-slate-600">Employees are records for sales, commission and closings. They do not get logins.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
             <div><label className={labelCls} htmlFor="n">Name</label><input id="n" name="name" className={input} required maxLength={120} /></div>
             <div><label className={labelCls} htmlFor="sd">Starts working here on</label><input id="sd" name="start" type="date" defaultValue={today ?? undefined} className={input} required /></div>
-            <div><label className={labelCls} htmlFor="pl">Has a login? (head employee)</label>
-              <select id="pl" name="profile" className={input}>
-                <option value="">No login</option>
-                {(members ?? []).filter((m) => !linked.has(m.profile_id)).map((m) => (
-                  <option key={m.profile_id} value={m.profile_id}>{(m.profiles as unknown as { full_name: string } | null)?.full_name} ({m.role})</option>
-                ))}
-              </select></div>
           </div>
         </ActionForm>
       </Card>
 
-      {(staff ?? []).map((s) => {
+      {ordered.map((s) => {
         const asg = (s.staff_assignments as { id: string; outlet_id: string; start_date: string; end_date: string | null; end_reason: string | null; is_temporary: boolean }[])
           .sort((a, b) => b.start_date.localeCompare(a.start_date));
         return (
-          <Card key={s.id} title={`${s.full_name}${s.active ? "" : " (inactive)"}`}>
+          <Card key={s.id} title={`${s.full_name}${s.active ? "" : ` (deactivated${s.inactive_from ? ` from ${fmtDate(s.inactive_from)}` : ""})`}`}>
             <ul className="mb-3 space-y-1 text-sm">
               {asg.map((a) => (
                 <li key={a.id} className="flex flex-wrap items-center gap-2">
@@ -65,7 +59,7 @@ export default async function StaffPage() {
                   <div><label className={labelCls} htmlFor={`nm-${s.id}`}>Name</label><input id={`nm-${s.id}`} name="name" defaultValue={s.full_name} className={input} required /></div>
                   <div><label className={labelCls} htmlFor={`ac-${s.id}`}>Status</label>
                     <select id={`ac-${s.id}`} name="active" defaultValue={String(s.active)} className={input}>
-                      <option value="true">Active</option><option value="false">Inactive (left)</option>
+                      <option value="true">Active</option><option value="false">Deactivated (left — history is kept)</option>
                     </select></div>
                   <div><label className={labelCls} htmlFor={`rs-${s.id}`}>Reason</label><input id={`rs-${s.id}`} name="reason" className={input} required /></div>
                 </ActionForm>

@@ -40,12 +40,13 @@ select throws_ok($$ insert into public.float_movements (outlet_id, type, effecti
 
 -- Permission boundaries on closings -------------------------------------------------------------------------
 select tests.entry('service', 1000, '2026-02-01', jsonb_build_object('staff_id', tests.staff('A')));
-select tests.login_as('counter');
+select tests.login_as('counter2');
 select throws_ok($$ select public.prepare_closing(tests.outlet('A'), '2026-02-01') $$, '42501', null,
-  'counter cannot prepare a closing');
+  'a retired (legacy counter) login cannot prepare a closing');
 reset role;
 select tests.login_as('head');
 insert into k select 'c1', (public.prepare_closing(tests.outlet('A'), '2026-02-01') ->> 'closing_id')::uuid;
+select public.set_closing_employee(pg_temp.k('c1'), tests.staff('A'));
 select ok((select v from k where name = 'c1') is not null, 'head prepares the closing');
 select ok((public.update_draft(pg_temp.k('c1'), 0, 10000, null, '{"50000":4}', null, 'Owner') -> 'blockers') ? 'split_mismatch',
   'UPI/card split that does not add up blocks submission');
@@ -139,6 +140,7 @@ select is((select count(*)::int from public.late_entry_reviews where entry_id = 
 select tests.entry('service', 1000, '2026-02-02', jsonb_build_object('staff_id', tests.staff('A')));
 select tests.login_as('head');
 insert into k select 'c2', (public.prepare_closing(tests.outlet('A'), '2026-02-02') ->> 'closing_id')::uuid;
+select public.set_closing_employee(pg_temp.k('c2'), tests.staff('A'));
 select public.update_draft(pg_temp.k('c2'), 0, null, null, '{"50000":4}', null, 'Owner');
 insert into k select 'd2r1', public.submit_closing(pg_temp.k('c2'));
 reset role;
@@ -187,25 +189,22 @@ reset role;
 select tests.entry('service', 5000, '2026-02-04', jsonb_build_object('staff_id', tests.staff('A')));
 select tests.login_as('head');
 insert into k select 'c4', (public.prepare_closing(tests.outlet('A'), '2026-02-04') ->> 'closing_id')::uuid;
-select throws_ok($$ select public.record_handover(pg_temp.k('c4'), tests.staff('A'), 10000, 'drawer') $$, '22023', null,
-  'commission can only be handed to the head (or a valid acting head)');
+select throws_ok($$ select public.record_handover(pg_temp.k('c4'), tests.staff('Bstaff'), 10000, 'drawer') $$, '22023', null,
+  'commission can only be handed to an employee working at this outlet that day');
 select throws_ok($$ select public.record_handover(pg_temp.k('c4'), tests.staff('headstaff'), 60000, 'drawer') $$, '22023', null,
   'handover cannot exceed the payable');
 reset role;
-select tests.login_as('manager');
-select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() + interval '8 hours', 'head on leave');
-reset role;
-select tests.login_as('counter2');
-select lives_ok($$ select public.record_handover(pg_temp.k('c4'), tests.staff('counter2staff'), 20000, 'drawer') $$,
-  'valid acting head may receive (and record) the handover');
+select tests.login_as('counter');
+select lives_ok($$ select public.record_handover(pg_temp.k('c4'), tests.staff('A'), 20000, 'drawer') $$,
+  'any employee working that day may receive the handover (recorded by the Shop/Staff login)');
 select throws_ok($$ select public.record_commission_return(pg_temp.k('c4'), 30000, 'drawer', 'too much') $$, '22023', null,
   'return cannot exceed what was handed over');
 reset role;
 
 -- Paytm CSV import (§7) --------------------------------------------------------------------------------
-select tests.login_as('counter');
+select tests.login_as('counter2');
 select throws_ok($$ select public.import_paytm_transactions(tests.outlet('A'), '[]', 'x.csv') $$, '42501', null,
-  'counter cannot import Paytm transactions');
+  'a retired (legacy counter) login cannot import Paytm transactions');
 reset role;
 select tests.login_as('head');
 select is(public.import_paytm_transactions(tests.outlet('A'), '[

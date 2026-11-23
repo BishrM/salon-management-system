@@ -59,7 +59,7 @@ export function Row({ label, value, strong, sub }: { label: React.ReactNode; val
   return (
     <div className={`flex items-baseline justify-between gap-4 py-1 ${strong ? "border-t border-slate-200 pt-2 font-semibold" : ""} ${sub ? "pl-4 text-sm text-slate-600" : ""}`}>
       <span>{label}</span>
-      <span className="num text-right">{value}</span>
+      <span className={`num text-right ${typeof value === "string" ? "whitespace-nowrap" : ""}`}>{value}</span>
     </div>
   );
 }

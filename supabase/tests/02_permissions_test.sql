@@ -1,23 +1,23 @@
 begin;
 \ir helpers.psql
 
-select plan(23);
+select plan(20);
 
--- Full permission matrix per role (Rev 6 §4) -----------------------------------------------------
+-- Full permission matrix per role (two account types since 001700) ----------------------------------
 create temp table expected (role text, perms text[]);
 insert into expected values
-  ('owner', array(select permission from app.permission_matrix())),
+  ('owner', array(select permission from app.permission_matrix() where 'owner' = any (roles))),
   ('manager', array['outlet.read','entries.record','closing.prepare','closing.submit','paytm.enter',
     'commission.handover','closing.approve','closing.reopen','review.acknowledge','late_entry.review',
-    'food_excess.allocate','commission.adjust','float.manage','date.assign','sync.manage','staff.manage',
-    'catalog.manage','reports.read','members.read','delegation.manage','outlet.denominations']),
-  ('head', array['outlet.read','entries.record','closing.prepare','closing.submit','paytm.enter','commission.handover']),
-  ('counter', array['outlet.read','entries.record']);
+    'food_excess.allocate','food_repayment.record','commission.adjust','float.manage','date.assign',
+    'sync.manage','staff.manage','catalog.manage','reports.read','members.read','outlet.denominations']),
+  ('shop', array['outlet.read','entries.record','closing.prepare','closing.submit','paytm.enter',
+    'commission.handover','staff.manage']);
 grant select on expected to authenticated;
 
 select tests.login_as('owner');
 select set_eq($$ select unnest(public.my_permissions(tests.outlet('A'))) $$,
-              $$ select unnest(perms) from expected where role = 'owner' $$, 'owner holds every permission');
+              $$ select unnest(perms) from expected where role = 'owner' $$, 'owner holds every granted permission');
 reset role;
 select tests.login_as('manager');
 select set_eq($$ select unnest(public.my_permissions(tests.outlet('A'))) $$,
@@ -26,11 +26,13 @@ select set_eq($$ select unnest(public.my_permissions(tests.outlet('A'))) $$,
 reset role;
 select tests.login_as('head');
 select set_eq($$ select unnest(public.my_permissions(tests.outlet('A'))) $$,
-              $$ select unnest(perms) from expected where role = 'head' $$, 'head employee permissions');
-reset role;
-select tests.login_as('counter');
-select set_eq($$ select unnest(public.my_permissions(tests.outlet('A'))) $$,
-              $$ select unnest(perms) from expected where role = 'counter' $$, 'counter operator permissions');
+              $$ select unnest(perms) from expected where role = 'shop' $$, 'Shop/Staff permissions');
+select ok(not app.has_permission(tests.outlet('A'), 'closing.approve')
+          and not app.has_permission(tests.outlet('A'), 'audit.read')
+          and not app.has_permission(tests.outlet('A'), 'users.manage')
+          and not app.has_permission(tests.outlet('A'), 'float.manage')
+          and not app.has_permission(tests.outlet('A'), 'reports.read'),
+          'Shop/Staff has no owner-only management permission');
 select is(public.my_permissions(tests.outlet('B')), '{}'::text[], 'no permissions in another outlet');
 reset role;
 select tests.login_as('nobody');
@@ -40,58 +42,39 @@ reset role;
 select throws_ok($$ select app.has_permission(tests.outlet('A'), 'no.such.permission') $$,
   '22023', null, 'unknown permission names raise instead of silently denying');
 
--- Acting head validity (Rev 6 §4.1) ---------------------------------------------------------------
--- Active delegation granted by manager.
-insert into public.outlet_memberships (id, outlet_id, profile_id, role, is_acting, valid_from, valid_to, granted_by, reason)
-values ('dddddddd-0000-4000-8000-000000000001', tests.outlet('A'), tests.uid('counter2'), 'head', true,
+-- Retired roles (001700): legacy head/counter memberships and acting-head delegations grant nothing. ----
+select tests.login_as('counter2');
+select is(public.my_permissions(tests.outlet('A')), '{}'::text[], 'a legacy counter membership grants nothing');
+reset role;
+insert into public.outlet_memberships (outlet_id, profile_id, role, granted_by, reason)
+values (tests.outlet('B'), tests.uid('counter2'), 'head', tests.uid('outsider'), 'legacy head');
+insert into public.outlet_memberships (outlet_id, profile_id, role, is_acting, valid_from, valid_to, granted_by, reason)
+values (tests.outlet('A'), tests.uid('counter2'), 'head', true,
         now() - interval '1 hour', now() + interval '1 hour', tests.uid('manager'), 'head on leave');
-
 select tests.login_as('counter2');
-select ok(app.has_permission(tests.outlet('A'), 'closing.submit'), 'active acting head gets head permissions');
-select ok(not app.has_permission(tests.outlet('A'), 'delegation.manage'), 'acting head cannot grant delegations');
-select ok(not app.has_permission(tests.outlet('A'), 'closing.approve'), 'acting head cannot approve closings');
-select ok(not app.has_permission(tests.outlet('B'), 'closing.submit'), 'delegation does not leak to other outlets');
+select is(public.my_permissions(tests.outlet('B')), '{}'::text[], 'a legacy head membership grants nothing');
+select ok(not app.has_permission(tests.outlet('A'), 'closing.submit'), 'an active acting-head delegation grants nothing');
+select ok(not app.is_member(tests.outlet('A')) and not app.is_member(tests.outlet('B')), 'legacy roles see no outlet');
+reset role;
+select tests.login_as('owner');
+select ok(not app.has_permission(tests.outlet('A'), 'delegation.manage'), 'nobody can grant delegations any more');
 reset role;
 
--- Grantor demoted -> delegation stops working.
+-- Grantor demoted (kept: revoking a management membership still works).
 update public.outlet_memberships set revoked_at = now(), revoked_by = tests.uid('owner'), revoke_reason = 'test'
- where outlet_id = tests.outlet('A') and profile_id = tests.uid('manager');
-select tests.login_as('counter2');
-select ok(not app.has_permission(tests.outlet('A'), 'closing.submit'), 'delegation ends when the grantor loses their role');
-reset role;
+ where outlet_id = tests.outlet('A') and profile_id = tests.uid('manager') and not is_acting;
 
--- Not yet started.
-insert into public.outlet_memberships (outlet_id, profile_id, role, is_acting, valid_from, valid_to, granted_by, reason)
-values (tests.outlet('A'), tests.uid('counter'), 'head', true, now() + interval '1 hour', now() + interval '2 hours', tests.uid('owner'), 'future');
-select tests.login_as('counter');
-select ok(not app.has_permission(tests.outlet('A'), 'closing.submit'), 'future delegation is not active yet');
-reset role;
-
--- Expired. valid_to = now() is already expired (half-open window).
-insert into public.outlet_memberships (outlet_id, profile_id, role, is_acting, valid_from, valid_to, granted_by, reason)
-values (tests.outlet('A'), tests.uid('counter'), 'head', true, now() - interval '2 hours', now(), tests.uid('owner'), 'expired at boundary');
-select tests.login_as('counter');
-select ok(not app.has_permission(tests.outlet('A'), 'closing.submit'), 'delegation ending exactly now is expired');
-reset role;
-
--- Starting exactly now is active.
-insert into public.outlet_memberships (id, outlet_id, profile_id, role, is_acting, valid_from, valid_to, granted_by, reason)
-values ('dddddddd-0000-4000-8000-000000000002', tests.outlet('A'), tests.uid('counter'), 'head', true, now(), now() + interval '1 hour', tests.uid('owner'), 'starts now');
-select tests.login_as('counter');
-select ok(app.has_permission(tests.outlet('A'), 'closing.submit'), 'delegation starting exactly now is active');
-reset role;
-
--- Revoked.
-update public.outlet_memberships set revoked_at = now(), revoked_by = tests.uid('owner'), revoke_reason = 'back early'
- where id = 'dddddddd-0000-4000-8000-000000000002';
-select tests.login_as('counter');
-select ok(not app.has_permission(tests.outlet('A'), 'closing.submit'), 'revoked delegation is inactive');
-select ok(app.has_permission(tests.outlet('A'), 'entries.record'), 'revoking a delegation keeps the base counter role');
-reset role;
+-- Shop/Staff is one shared login per outlet, and a shop login belongs to one outlet.
+select throws_ok($$ insert into public.outlet_memberships (outlet_id, profile_id, role, granted_by, reason)
+                    values (tests.outlet('A'), tests.uid('nobody'), 'shop', tests.uid('owner'), 'second shop') $$,
+  '23505', null, 'a second Shop/Staff login for the same outlet is refused');
+select throws_ok($$ insert into public.outlet_memberships (outlet_id, profile_id, role, granted_by, reason)
+                    values (tests.outlet('B'), tests.uid('head'), 'shop', tests.uid('outsider'), 'shop of two outlets') $$,
+  '23505', null, 'one Shop/Staff login cannot serve two outlets');
 
 -- Permanent membership with NULL valid_to stays valid; with a past valid_to it is not.
 select tests.login_as('head');
-select ok(app.has_permission(tests.outlet('A'), 'closing.submit'), 'permanent membership with NULL valid_to is valid');
+select ok(app.has_permission(tests.outlet('A'), 'closing.submit'), 'permanent Shop/Staff membership with NULL valid_to is valid');
 reset role;
 
 -- Inactive profile loses all roles.

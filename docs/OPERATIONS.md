@@ -10,8 +10,8 @@ cp .env.example .env.local   # paste the API URL, publishable/anon key and servi
 npm run dev               # http://localhost:3000
 ```
 
-Seed logins (**local only** — never seed a hosted project, its passwords are predictable; see `docs/STAGING_SETUP.md`): `owner@salonops.test` / `owner-Pass-1`, likewise `manager`, `head`,
-`counter`, `outsider` (owner of a second outlet, for isolation checks). The seed sets the cutoff to 04:00
+Seed logins (**local only** — never seed a hosted project, its passwords are predictable; see `docs/STAGING_SETUP.md`): `owner@salonops.test` / `owner-Pass-1`, likewise `manager`, `shop` (the HUDCO
+Shop/Staff login, D-28), `outsider` (owner of a second outlet, for isolation checks). The seed sets the cutoff to 04:00
 and creates demo staff and products; the **initial float is not seeded** — sign in as owner and use
 Admin → Cash float, as in production.
 
@@ -41,6 +41,11 @@ add a new one):
 | `…001100_paytm_import_changes` | Paytm re-import reports rows whose amount/status changed (never overwrites) |
 | `…001300_food_void_and_withdraw` | paid-food "remove and cancel payment" in one op; `blocked_by`; sender can withdraw a failed op (D-22, D-23) |
 | `…001200_audit_global_rows` | audit rows of `staff`/`profiles` visible only to `audit.read` holders of an outlet they belong to (D3) |
+| `…001400_withdraw_blocked_op` | the session holding a blocked op can withdraw it (D-25) |
+| `…001500_service_payment_method` | Cash / UPI-Paytm-Card on every service sale (D-26) |
+| `…001600_shop_role` | adds the `shop` role value (own migration: an enum value cannot be used in the transaction that adds it) |
+| `…001700_two_account_model` | Owner + one Shop/Staff login per outlet; head/counter grant nothing; dated employee deactivation; handover to any employee working that day (D-28, D-29, D-32) |
+| `…001800_closing_attribution_and_food` | "Who performed the closing?", revised food rule (breakfast salon-funded, excess owed by employees), food repayments (D-30, D-31) |
 
 ```bash
 supabase db reset          # local: rebuild from migrations + seed

@@ -9,7 +9,7 @@ import { BLOCKERS, WARNINGS, ACKS, SETTLEMENT, KIND } from "@/lib/labels";
 import type { DaySummary, Revision } from "@/lib/types";
 import {
   updateDraft, submitClosing, approveClosing, rejectClosing, reopenClosing, allocateFoodExcess, recordHandover,
-  recordReturn, acceptOverpayment, acknowledgeReview, reviewLateEntry, prepareClosing,
+  recordReturn, acceptOverpayment, acknowledgeReview, reviewLateEntry, prepareClosing, setClosingEmployee,
 } from "../../actions";
 
 export async function generateMetadata({ params }: { params: Promise<{ date: string }> }): Promise<Metadata> {
@@ -28,7 +28,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
   const s = sum as DaySummary;
   const closing = s.closing_id;
 
-  const [{ data: revisions }, { data: events }, { data: handovers }, { data: staff }, { data: lateEntries }, { data: latePays }, { data: reviews }, { data: profiles }] =
+  const [{ data: revisions }, { data: events }, { data: handovers }, { data: staff }, { data: lateEntries }, { data: latePays }, { data: reviews }, { data: profiles }, { data: workers }, { data: rule }] =
     await Promise.all([
       closing ? supabase.from("closing_revisions").select("*").eq("closing_id", closing).order("revision_no") : Promise.resolve({ data: [] }),
       closing ? supabase.from("closing_events").select("*").eq("closing_id", closing).order("server_seq") : Promise.resolve({ data: [] }),
@@ -38,6 +38,9 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
       supabase.from("food_payments").select("id, amount, paid_from, received_at").eq("outlet_id", outlet.id).eq("business_date", date).eq("late", true),
       closing ? supabase.from("late_entry_reviews").select("*").eq("closing_id", closing).order("server_seq") : Promise.resolve({ data: [] }),
       supabase.from("profiles").select("id, full_name"),
+      // Employees assigned to this outlet and active on this business date (closing attribution, handovers).
+      supabase.rpc("closing_employees", { p_outlet: outlet.id, p_date: date }),
+      supabase.from("outlets").select("food_rule_v2_from").eq("id", outlet.id).single(),
     ]);
   const revs = (revisions ?? []) as Revision[];
   const current = revs[revs.length - 1];
@@ -53,7 +56,11 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
     ...(current.variance !== 0 ? ["variance"] : []),
     ...(s.warnings.includes("unassigned_entries") ? ["unassigned_entries"] : []),
   ] : [];
-  const recipients = (staff ?? []).filter((x) => x.profile_id);
+  const recipients = (workers ?? []) as { id: string; full_name: string }[];
+  // D-31: from this date breakfast is a salon expense and food above the commission is owed by employees.
+  const revisedFood = !!rule?.food_rule_v2_from && date >= rule.food_rule_v2_from;
+  const lunchDinner = s.food_cost - s.food_breakfast_salon;
+  const finalBalance = s.commission_pool - (revisedFood ? lunchDinner : s.food_cost);
 
   return (
     <Page
@@ -65,7 +72,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
     >
       <div className="flex flex-wrap items-center gap-3">
         <StateBadge state={s.state} />
-        {current && <span className="text-sm text-slate-600">Revision {current.revision_no} · submitted by {name(current.submitted_by)} {fmtTime(current.submitted_at)}</span>}
+        {current && <span className="text-sm text-slate-600">Revision {current.revision_no} · submitted {fmtTime(current.submitted_at)} from the {name(current.submitted_by)} login</span>}
         {s.needs_review && <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-900">Needs review</span>}
       </div>
       {s.state === "rejected" && <Notice tone="error">Rejected: {lastEvent(events ?? [], "rejected")?.reason}</Notice>}
@@ -78,6 +85,25 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
               <p className="text-sm text-slate-600">Figures below are live. Start the closing to enter Paytm and count the cash.</p>
             </ActionForm></Card>
           : <Notice>No closing has been started for this day.</Notice>
+      )}
+
+      {closing && (
+        <Card title="Who performed the closing?">
+          {canEdit ? (
+            <ActionForm action={setClosingEmployee} submit="Save" resetOnSuccess={false}>
+              <input type="hidden" name="closing" value={closing} />
+              <label className={labelCls} htmlFor="closer">Employee who counted the cash and closed the day (required)</label>
+              <select id="closer" name="staff" className={input} required defaultValue={s.closed_by_staff_id ?? ""}>
+                <option value="" disabled>Choose an employee…</option>
+                {recipients.map((r) => <option key={r.id} value={r.id}>{r.full_name}</option>)}
+              </select>
+              <p className="text-xs text-slate-500">Only employees working here on {fmtDate(date)} are listed. This records who did the closing; the app is still used through the shop login.</p>
+            </ActionForm>
+          ) : (
+            <p className="text-sm"><b>{s.closed_by_staff_id ? staffName(s.closed_by_staff_id) : "Not recorded"}</b>
+              {current && <span className="text-slate-600"> · submitted from the {name(current.submitted_by)} login</span>}</p>
+          )}
+        </Card>
       )}
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -100,10 +126,18 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
             {s.paytm_imported_count > 0 && <> Imported Paytm successes: {rupees(s.paytm_imported_success_total)} ({s.paytm_imported_count}).</>}</p>}
         </Card>
 
-        <Card title="3. Food (paid from commission)">
-          <Row label="Food cost today" value={rupees(s.food_cost)} />
-          <Row sub label="funded by commission" value={rupees(s.food_commission_funded)} />
-          {s.food_shop_funded > 0 && <Row sub label={s.blockers.includes("food_excess_unallocated") ? "extra paid by the shop (needs approval)" : "extra paid by the shop (approved)"} value={rupees(s.food_shop_funded)} />}
+        <Card title="3. Food">
+          {revisedFood ? <>
+            <Row label="Total food cost" value={rupees(s.food_cost)} />
+            <Row sub label="Breakfast — salon expense" value={rupees(s.food_breakfast_salon)} />
+            <Row sub label="Lunch and dinner — from commission" value={rupees(lunchDinner)} />
+            <Row label="Commission deducted for food" value={`− ${rupees(s.food_commission_funded)}`} />
+            {s.food_employee_owed > 0 && <Row strong label="Food not covered by commission — owed to the salon by employees" value={<span className="text-rose-700">{rupees(s.food_employee_owed)}</span>} />}
+          </> : <>
+            <Row label="Food cost today" value={rupees(s.food_cost)} />
+            <Row sub label="funded by commission" value={rupees(s.food_commission_funded)} />
+            {s.food_shop_funded > 0 && <Row sub label={s.blockers.includes("food_excess_unallocated") ? "extra paid by the shop (needs approval)" : "extra paid by the shop (approved)"} value={rupees(s.food_shop_funded)} />}
+          </>}
           <Row label="Paid from drawer today (today's food)" value={rupees(s.food_paid_drawer_today)} />
           <Row label="Paid from drawer today (earlier days' food)" value={rupees(s.food_paid_drawer_prior)} />
           <Row label="Today's food not paid from the drawer" value={rupees(s.food_not_paid_drawer)} />
@@ -129,12 +163,13 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
         />
         <div className="mt-3 max-w-md">
           <Row label="Commission pool" value={rupees(s.commission_pool)} />
-          <Row label="Food from commission" value={`− ${rupees(s.food_commission_funded)}`} />
+          <Row label="Food deducted from commission" value={`− ${rupees(s.food_commission_funded)}`} />
           <Row strong label="Commission cash payable" value={rupees(s.remaining_payable)} />
+          {revisedFood && <Row strong label="Final balance (commission − lunch and dinner)" value={<BalanceText paise={finalBalance} />} />}
         </div>
       </Card>
 
-      <Card title="5. Commission cash handed to the head employee">
+      <Card title="5. Commission cash handed over">
         {s.settlement && (
           <div className="mb-3 grid max-w-xl gap-x-6 sm:grid-cols-2">
             <Row label="Payable" value={rupees(s.settlement.allowed)} />
@@ -142,7 +177,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
             <Row label="From the drawer" value={rupees(s.settlement.drawer_net)} />
             <Row label="From outside the drawer" value={rupees(s.settlement.handed_outside_drawer)} />
             <Row label="Returned" value={rupees(s.settlement.returned)} />
-            <Row label="Still owed to head" value={rupees(s.settlement.outstanding)} />
+            <Row label="Still to hand over" value={rupees(s.settlement.outstanding)} />
             {s.settlement.excess > 0 && <Row label="Over-handed" value={rupees(s.settlement.excess)} />}
             {s.settlement.accepted_overpayment > 0 && <Row label="Accepted overpayment (not cash)" value={rupees(s.settlement.accepted_overpayment)} />}
           </div>
@@ -170,7 +205,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
             </ActionForm>
             <ActionForm action={recordReturn} submit="Record return">
               <input type="hidden" name="closing" value={closing} />
-              <div><label className={labelCls} htmlFor="rt-amt">Amount returned by head (₹)</label><input id="rt-amt" name="amount" inputMode="numeric" className={input} required /></div>
+              <div><label className={labelCls} htmlFor="rt-amt">Amount returned (₹)</label><input id="rt-amt" name="amount" inputMode="numeric" className={input} required /></div>
               <div><label className={labelCls} htmlFor="rt-src">Returned to</label>
                 <select id="rt-src" name="source" className={input}>
                   {!current && <option value="drawer">Cash drawer</option>}
@@ -179,7 +214,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
               <div><label className={labelCls} htmlFor="rt-r">Reason</label><input id="rt-r" name="reason" className={input} required /></div>
             </ActionForm>
             {can("commission.adjust") && (s.settlement?.unresolved_excess ?? 0) > 0 && (
-              <ActionForm action={acceptOverpayment} submit="Accept overpayment" confirm="Accept that the head keeps this extra commission? No cash moves.">
+              <ActionForm action={acceptOverpayment} submit="Accept overpayment" confirm="Accept that the employees keep this extra commission? No cash moves.">
                 <input type="hidden" name="closing" value={closing} />
                 <div><label className={labelCls} htmlFor="ov-amt">Amount (₹, up to {rupees(s.settlement!.unresolved_excess)})</label><input id="ov-amt" name="amount" inputMode="numeric" className={input} required /></div>
                 <div><label className={labelCls} htmlFor="ov-r">Reason</label><input id="ov-r" name="reason" className={input} required /></div>
@@ -243,7 +278,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
             <Row strong label="Expected in drawer" value={rupees(s.expected_drawer)} />
             <details className="mt-2 text-xs text-slate-600">
               <summary className="cursor-pointer">How this matches the SRS formula</summary>
-              <p className="mt-1">Opening {rupees(s.opening_float)} + during-day {rupees(s.intraday_top_ups)} + SRS cash {rupees(s.net_cash)} + commission still in drawer {rupees(s.commission_retained)} + today&apos;s food not paid from drawer {rupees(s.food_not_paid_drawer)} − earlier food paid today {rupees(s.food_paid_drawer_prior)} − shop-paid food {rupees(s.food_shop_funded)} = {rupees(s.expected_drawer)}</p>
+              <p className="mt-1">Opening {rupees(s.opening_float)} + during-day {rupees(s.intraday_top_ups)} + SRS cash {rupees(s.net_cash)} + commission still in drawer {rupees(s.commission_retained)} + today&apos;s food not paid from drawer {rupees(s.food_not_paid_drawer)} − earlier food paid today {rupees(s.food_paid_drawer_prior)} − salon-paid food {rupees(s.food_shop_funded)}{s.food_employee_owed > 0 && <> − food owed by employees {rupees(s.food_employee_owed)}</>} = {rupees(s.expected_drawer)}</p>
             </details>
           </div>
           <div>
@@ -254,7 +289,7 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
             {s.float_shortfall > 0 && <Row label="Float shortfall (owner to top up)" value={<span className="text-rose-700">{rupees(s.float_shortfall)}</span>} />}
             <Row strong label="Cash taken home" value={rupees(s.take_home)} />
             {s.take_home > 0 && (s.commission_retained > 0 || s.food_not_paid_drawer > 0) && (
-              <p className="text-xs text-slate-600">Of which: commission still owed to head {rupees(Math.max(0, s.commission_retained))}
+              <p className="text-xs text-slate-600">Of which: commission still to hand over {rupees(Math.max(0, s.commission_retained))}
                 {s.food_not_paid_drawer > 0 && <>, food not yet paid {rupees(s.food_not_paid_drawer)}</>}.</p>
             )}
           </div>
@@ -343,13 +378,16 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
           <Table
             head={["", ...revs.map((r) => `Rev ${r.revision_no}`)]}
             rows={([
-              ["Submitted", (r: Revision) => `${name(r.submitted_by)} ${fmtTime(r.submitted_at)}`],
+              ["Submitted (login)", (r: Revision) => `${name(r.submitted_by)} ${fmtTime(r.submitted_at)}`],
+              ["Closing done by", (r: Revision) => r.closed_by_staff_id ? staffName(r.closed_by_staff_id) : "not recorded"],
               ["Service sales", (r: Revision) => rupees(r.service_total)],
               ["Commission", (r: Revision) => rupees(r.commission_pool)],
               ["Products", (r: Revision) => rupees(r.product_total)],
               ["Paytm", (r: Revision) => rupees(r.paytm_total)],
               ["Expenses + zakat", (r: Revision) => rupees(r.expenses_total + r.zakat_total)],
               ["Food cost", (r: Revision) => rupees(r.food_cost)],
+              ["Food from commission", (r: Revision) => rupees(r.food_commission_funded)],
+              ["Food owed by employees", (r: Revision) => rupees(r.food_employee_owed)],
               ["Opening float", (r: Revision) => rupees(r.opening_float)],
               ["Expected", (r: Revision) => rupees(r.expected_drawer)],
               ["Counted", (r: Revision) => rupees(r.counted_cash)],
@@ -373,6 +411,13 @@ export default async function ClosingDay({ params }: { params: Promise<{ date: s
       )}
     </Page>
   );
+}
+
+/** Positive = commission left, zero = used up by food, negative = owed to the salon (D-31). */
+function BalanceText({ paise }: { paise: number }) {
+  if (paise > 0) return <span className="text-emerald-700">{rupees(paise)} commission left</span>;
+  if (paise === 0) return <span>₹0 — commission fully used for food</span>;
+  return <span className="text-rose-700">− {rupees(-paise)} owed to the salon</span>;
 }
 
 type Ev = { id: string; type: string; server_seq: number; reason: string | null; payload: Record<string, unknown> | null };

@@ -473,3 +473,58 @@ was broken.
 or approved day, and the server refuses them (SO423) as a failed op the counter must withdraw. React #418
 (times formatted server-side in UTC vs client IST) remains. Staging S3 keeps 13 service rows with no
 recorded method (live user data, untouched).
+
+## 17. Two-account structure, employee management, closing attribution, revised food (2026-11-23, local only)
+**Scope:** branch `feature/two-account-model` from `salonops-v1` (`0939679`, which is one commit ahead of
+the staging deployment `fde5947`). Migrations `…001600_shop_role`, `…001700_two_account_model`,
+`…001800_closing_attribution_and_food`. Decisions D-28 to D-32; open items U1–U4 (`DECISIONS.md`).
+**Nothing was pushed, deployed or applied to staging or production.** `main` untouched.
+
+**Owner decisions taken before implementation (2026-11-23):** breakfast becomes a salon expense; food above
+the commission is owed by employees (not absorbed by the shop); repayments go to the owner outside the
+drawer; the manager login is kept as an owner-side account.
+
+**What changed**
+| Area | Before | After |
+|---|---|---|
+| Accounts | owner, manager, head, counter, acting head | Owner side (owner, manager) + one Shop/Staff login per outlet; head/counter/acting rows kept but powerless |
+| Employees | managed by owner/manager; `active=false` invalid on every date | also by Shop/Staff; deactivation dated (`inactive_from`), valid for earlier dates; never deleted |
+| Closing | submitter only | required "Who performed the closing?" employee, validated on the business date, stored per revision |
+| Handover recipient | employee with a head login | any employee working at the outlet that day |
+| Food (from start date) | all meals from commission; excess paid by the shop after approval | breakfast salon-funded; lunch/dinner from commission; excess owed by employees; repayments recorded outside the drawer |
+
+**Migration safety:** additive only (enum value, columns with defaults, new table, unique partial indexes on
+a role value no row had yet). Two CHECK constraints on `closing_revisions` were replaced (`rev_food_split`,
+`rev_bridge`); the new forms equal the old ones when `food_employee_owed = 0`, which is true for every
+existing row, and PostgreSQL re-validated them on apply. `rev_closed_by` is `NOT VALID` (new revisions only).
+No row is updated or deleted. Applied to the local Supabase stack with existing data (`supabase migration
+up`): no audit rows were written by the migration; existing revisions and entries unchanged.
+
+**Effect when applied to staging (needs approval):** the existing staging head and counter logins will no
+longer have access; the owner must create the HUDCO Shop/Staff login (Admin → Logins). Days from the
+apply date use the revised food rule. A service worker cache bump is not needed for this change.
+
+**Tests (all local)**
+| Suite | Result |
+|---|---|
+| pgTAP, local PG17 harness (`npm run test:db`) | 491/491 (was 434; +63 new in `12_…`, legacy-role assertions rewritten) |
+| pgTAP, genuine `supabase test db` on the local stack | 491/491 PASS |
+| Concurrency (`scripts/test-concurrency.sh`) | 11/11 (committed closing now under the revised rule: ED ₹2,250 unchanged) |
+| Vitest | 71/71 (incl. `foodSplit` mirror) |
+| `tsc --noEmit`, `eslint` | clean |
+| `next build` | success |
+
+**Local UI walkthrough (in-app browser, local Supabase, test data):** Shop/Staff login → Register works;
+nav shows Register / Dashboard / Closing / Employees only; `/approvals`, `/reports`, `/admin/users`,
+`/admin/audit` redirect to "denied". Employees: added "Esha"; deactivated "Chandan" → "deactivated from
+24 Nov", moved to the end, still offered for the 19 Nov closing. Closing 19 Nov: blocker "Choose who
+performed the closing." until chosen; submitted from the Shop/Staff login; owner's Approvals list shows
+"Closing done by Bhavya"; approved; history shows "submitted by HUDCO Shop/Staff (test)" and "approved by
+Owner (test)". Revised food on 23 Nov (breakfast ₹300, lunch ₹1,000, dinner ₹800, S ₹15,000): Food card and
+final balance "− ₹300 owed to the salon"; after approval the Closing page showed ₹300 owed; a ₹200 cash
+repayment through the form left ₹100. 375 px and 768 px: no horizontal page scroll; no console errors.
+(Two old local late entries on 18 Nov were excluded as owner to unblock the approval order — local data only.)
+
+**Not verified:** staging/production (not applied), real tablets/offline on device, the export file opened in
+Excel (code path type-checked and built only), concurrent repayments from two sessions (serialised by an
+outlet row lock, not exercised by the concurrency script).

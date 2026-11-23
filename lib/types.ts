@@ -20,6 +20,10 @@ export type DaySummary = {
   service_total: number; commission_pool: number; product_total: number; product_cash: number; product_paytm: number;
   service_paytm: number; cash_sales: number; expenses_total: number; expenses_outside_total: number; zakat_total: number;
   food_cost: number; food_commission_funded: number; food_shop_funded: number; remaining_payable: number;
+  // …001800: breakfast paid by the salon and lunch/dinner above the commission owed by employees (D-31).
+  food_breakfast_salon: number; food_employee_owed: number;
+  /** Employee who physically performed the closing (attribution only; D-30). */
+  closed_by_staff_id: string | null;
   food_paid_drawer_today: number; food_paid_drawer_prior: number; food_paid_drawer: number; food_not_paid_drawer: number;
   drawer_handover_total: number; commission_retained: number; net_cash: number; expected_drawer: number;
   counted_cash: number; variance: number; required_float: number; retained_float: number; float_shortfall: number;

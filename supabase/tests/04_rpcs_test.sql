@@ -1,7 +1,7 @@
 begin;
 \ir helpers.psql
 
-select plan(36);
+select plan(33);
 
 -- set_outlet_cutoff (owner only) ------------------------------------------------------------------
 select tests.login_as('manager');
@@ -40,8 +40,10 @@ reset role;
 
 -- Staff ------------------------------------------------------------------------------------------
 select tests.login_as('head');
-select throws_ok($$ select public.create_staff(tests.outlet('A'), 'New Stylist', '2026-11-01') $$,
-  '42501', null, 'head cannot create staff');
+select lives_ok($$ select public.create_staff(tests.outlet('A'), 'Shop Hire', '2026-11-01') $$,
+  'Shop/Staff adds an employee to its outlet');
+select throws_ok($$ select public.create_staff(tests.outlet('B'), 'Spy', '2026-11-01') $$,
+  '42501', null, 'Shop/Staff cannot add an employee to another outlet');
 reset role;
 select tests.login_as('manager');
 select throws_ok($$ select public.create_staff(tests.outlet('B'), 'Spy', '2026-11-01') $$,
@@ -71,54 +73,40 @@ select throws_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('n
   '42501', null, 'owner''s son cannot add users (users.manage is owner only)');
 reset role;
 select tests.login_as('owner');
-select lives_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('nobody'), 'counter', 'hired') $$,
-  'owner adds a counter operator');
-select throws_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('nobody'), 'head', 'promote') $$,
+select throws_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('nobody'), 'counter', 'hired') $$,
+  '22023', null, 'retired roles (counter, head) cannot be granted');
+select lives_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('nobody'), 'manager', 'hired') $$,
+  'owner adds a management login');
+select throws_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('nobody'), 'shop', 'again') $$,
   '23505', null, 'duplicate permanent membership is rejected');
+select throws_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('owner2'), 'shop', 'second shop') $$,
+  '23505', null, 'an outlet has one Shop/Staff login');
+select throws_ok($$ select public.add_membership(tests.outlet('A'), tests.uid('head'), 'owner', 'promote shop') $$,
+  '23505', null, 'the Shop/Staff login cannot also hold a management role');
 select throws_ok($$ select public.revoke_membership(
                      (select id from public.outlet_memberships where profile_id = tests.uid('owner') and outlet_id = tests.outlet('A')),
                      'leaving') $$,
   '22023', null, 'the last owner cannot be revoked');
+select lives_ok($$ select public.revoke_membership(
+                     (select id from public.outlet_memberships where profile_id = tests.uid('nobody') and revoked_at is null),
+                     'left') $$, 'owner revokes a membership');
+select throws_ok($$ select public.revoke_membership(
+                     (select id from public.outlet_memberships where profile_id = tests.uid('nobody')), 'again') $$,
+  '22023', null, 'a revoked membership cannot be revoked again');
 reset role;
 
--- Acting-head delegation (Rev 6 §4.1) --------------------------------------------------------------
-select tests.login_as('head');
+-- Acting-head delegation was retired (001700): nobody can grant one. ---------------------------------
+select tests.login_as('owner');
 select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() + interval '8 hours', 'cover') $$,
-  '42501', null, 'head cannot grant delegations');
+  '42501', null, 'owner cannot grant an acting-head delegation');
 reset role;
 select tests.login_as('manager');
-select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('manager'), now() + interval '8 hours', 'me') $$,
-  '42501', null, 'manager cannot delegate to themselves');
-select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), null, 'open ended') $$,
-  '22023', null, 'delegation needs an end time');
-select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() - interval '1 minute', 'past',
-                   now() - interval '2 hours') $$,
-  '22023', null, 'delegation ending in the past is rejected');
-select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() + interval '1 hour', 'inverted',
-                   now() + interval '2 hours') $$,
-  '22023', null, 'delegation end before start is rejected');
-select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('outsider'), now() + interval '8 hours', 'outsider') $$,
-  '22023', null, 'delegation target must be a member of the outlet');
-select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() + interval '8 hours', '') $$,
-  '22023', null, 'delegation needs a reason');
-create temp table d as
-  select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() + interval '8 hours', 'head on leave') as id;
-select is(
-  (select row(granted_by, is_acting, role)::text from public.outlet_memberships where id = (select id from d)),
-  row(tests.uid('manager'), true, 'head'::public.app_role)::text,
-  'delegation recorded with the authorising manager taken from the session');
+select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() + interval '8 hours', 'cover') $$,
+  '42501', null, 'manager cannot grant an acting-head delegation');
 reset role;
-
-select tests.login_as('counter2');
-select ok(app.has_permission(tests.outlet('A'), 'closing.prepare'), 'acting head can prepare closings during the window');
-select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter'), now() + interval '1 hour', 'chain') $$,
-  '42501', null, 'acting head cannot sub-delegate');
-reset role;
-
-select tests.login_as('owner');
-select lives_ok($$ select public.revoke_membership((select id from d), 'head is back') $$, 'owner revokes the delegation early');
-select throws_ok($$ select public.revoke_membership((select id from d), 'again') $$,
-  '22023', null, 'a revoked membership cannot be revoked again');
+select tests.login_as('head');
+select throws_ok($$ select public.grant_acting_head(tests.outlet('A'), tests.uid('counter2'), now() + interval '8 hours', 'cover') $$,
+  '42501', null, 'Shop/Staff cannot grant an acting-head delegation');
 reset role;
 
 select * from finish();

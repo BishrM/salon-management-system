@@ -111,14 +111,14 @@ export async function upsertProduct(fd: FormData) {
     "Product saved.");
 }
 
-// Users and delegation ----------------------------------------------------------------------------------
+// Users -----------------------------------------------------------------------------------------------
 export async function createUser(fd: FormData): Promise<ActionResult> {
   const parsed = z.object({
     outlet: uuid,
     full_name: z.string().trim().min(1, "Name is required").max(120),
     email: z.string().trim().email("Enter a valid email"),
     password: z.string().min(8, "Password must be at least 8 characters").regex(/[A-Za-z]/, "Password needs a letter").regex(/\d/, "Password needs a digit"),
-    role: z.enum(["owner", "manager", "head", "counter"]),
+    role: z.enum(["owner", "manager", "shop"]),
   }).safeParse(obj(fd));
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const v = parsed.data;
@@ -140,17 +140,8 @@ export async function createUser(fd: FormData): Promise<ActionResult> {
 }
 
 export async function addMembership(fd: FormData) {
-  return rpcAction(z.object({ outlet: uuid, profile: uuid, role: z.enum(["owner", "manager", "head", "counter"]), reason }), obj(fd),
+  return rpcAction(z.object({ outlet: uuid, profile: uuid, role: z.enum(["owner", "manager", "shop"]), reason }), obj(fd),
     "add_membership", (v) => ({ p_outlet: v.outlet, p_profile: v.profile, p_role: v.role, p_reason: v.reason }), "Role added.");
-}
-
-export async function grantActingHead(fd: FormData) {
-  return rpcAction(
-    z.object({ outlet: uuid, profile: uuid, from: z.string().optional(), to: z.string().min(1, "End time is required"), reason }),
-    obj(fd), "grant_acting_head",
-    (v) => ({ p_outlet: v.outlet, p_profile: v.profile, p_valid_to: new Date(v.to).toISOString(), p_reason: v.reason,
-      p_valid_from: v.from ? new Date(v.from).toISOString() : null }),
-    "Acting head granted.");
 }
 
 export async function revokeMembership(fd: FormData) {
@@ -209,6 +200,27 @@ export async function updateDraft(fd: FormData): Promise<ActionResult> {
     (v) => ({ p_closing: v.closing, p_paytm_total: v.paytm_total, p_paytm_upi: v.paytm_upi, p_paytm_card: v.paytm_card,
       p_denominations: den, p_variance_reason: v.variance_reason, p_take_home_by: v.take_home_by }),
     "Saved.");
+}
+
+export async function setClosingEmployee(fd: FormData) {
+  return rpcAction(z.object({ closing: uuid, staff: z.string().uuid("Choose who performed the closing") }), obj(fd),
+    "set_closing_employee", (v) => ({ p_closing: v.closing, p_staff: v.staff }), "Saved.");
+}
+
+export async function recordFoodRepayment(fd: FormData) {
+  const staffIds = fd.getAll("staff").map(String).filter(Boolean);
+  return rpcAction(
+    z.object({ outlet: uuid, amount: rupeesToPaise("Amount"), method: z.enum(["cash", "paytm"]), received: date,
+      staff: z.array(uuid).max(50), note: optText }),
+    { ...obj(fd), staff: staffIds }, "record_food_repayment",
+    (v) => ({ p_outlet: v.outlet, p_amount: v.amount, p_payment_method: v.method, p_received_on: v.received,
+      p_staff_ids: v.staff, p_note: v.note }),
+    "Repayment recorded.");
+}
+
+export async function reverseFoodRepayment(fd: FormData) {
+  return rpcAction(z.object({ repayment: uuid, reason }), obj(fd), "reverse_food_repayment",
+    (v) => ({ p_repayment: v.repayment, p_reason: v.reason }), "Repayment reversed.");
 }
 
 export async function allocateFoodExcess(fd: FormData) {

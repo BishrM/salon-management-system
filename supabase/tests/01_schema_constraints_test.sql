@@ -37,7 +37,9 @@ select set_eq(
         'prepare_closing','update_draft','allocate_food_excess','submit_closing','approve_closing',
         'reject_closing','reopen_closing','acknowledge_review','review_late_entry','establish_initial_float',
         'record_top_up','change_required_float','reverse_float_movement','record_handover',
-        'record_commission_return','accept_commission_overpayment','import_paytm_transactions'],
+        'record_commission_return','accept_commission_overpayment','import_paytm_transactions',
+        'closing_employees','set_closing_employee','food_debt_summary','record_food_repayment',
+        'reverse_food_repayment'],
   'authenticated can execute exactly the RPC allow-list');
 
 select ok(not has_function_privilege('authenticated', 'app.bootstrap_outlet(text,text,uuid)', 'EXECUTE'),
@@ -54,7 +56,7 @@ select is((select full_name from public.profiles where id = tests.uid('owner')),
   'a profile is created for each new auth user');
 
 -- Audit log is append-only, even for postgres ------------------------------------------------------
-select ok((select count(*) from public.audit_logs where table_name = 'outlet_memberships') >= 6,
+select ok((select count(*) from public.audit_logs where table_name = 'outlet_memberships') >= 5,
   'membership inserts are audited');
 select throws_ok($$ update public.audit_logs set reason = 'x' $$, 'P0001', null, 'audit_logs: UPDATE blocked');
 select throws_ok($$ delete from public.audit_logs $$, 'P0001', null, 'audit_logs: DELETE blocked');

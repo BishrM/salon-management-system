@@ -31,8 +31,8 @@ $$;
 
 select pg_temp.seed_user('11111111-1111-4111-8111-111111111101', 'owner@salonops.test',   'Owner (test)',          'owner-Pass-1');
 select pg_temp.seed_user('11111111-1111-4111-8111-111111111102', 'manager@salonops.test', 'Owner''s son (test)',    'manager-Pass-1');
-select pg_temp.seed_user('11111111-1111-4111-8111-111111111103', 'head@salonops.test',    'Head employee (test)',  'head-Pass-1');
-select pg_temp.seed_user('11111111-1111-4111-8111-111111111104', 'counter@salonops.test', 'Counter operator (test)','counter-Pass-1');
+-- The outlet's one shared Shop/Staff login (used by every employee at the salon; DECISIONS D-28).
+select pg_temp.seed_user('11111111-1111-4111-8111-111111111103', 'shop@salonops.test',    'HUDCO Shop/Staff (test)', 'shop-Pass-1');
 select pg_temp.seed_user('11111111-1111-4111-8111-111111111105', 'outsider@salonops.test','Other outlet owner (test)','outsider-Pass-1');
 
 do $$
@@ -49,15 +49,14 @@ begin
 
   insert into public.outlet_memberships (outlet_id, profile_id, role, granted_by, reason) values
     (v_main, '11111111-1111-4111-8111-111111111102', 'manager', '11111111-1111-4111-8111-111111111101', 'seed'),
-    (v_main, '11111111-1111-4111-8111-111111111103', 'head',    '11111111-1111-4111-8111-111111111101', 'seed'),
-    (v_main, '11111111-1111-4111-8111-111111111104', 'counter', '11111111-1111-4111-8111-111111111101', 'seed');
+    (v_main, '11111111-1111-4111-8111-111111111103', 'shop',    '11111111-1111-4111-8111-111111111101', 'seed');
 
-  -- Demo employees (the head employee's staff record is linked to the head login) and catalogue.
+  -- Demo employees (records only, no logins) and catalogue.
   insert into public.staff (id, full_name, profile_id) values
     ('5eed0000-0000-4000-8000-000000000001', 'Arun', null),
     ('5eed0000-0000-4000-8000-000000000002', 'Bhavya', null),
     ('5eed0000-0000-4000-8000-000000000003', 'Chandan', null),
-    ('5eed0000-0000-4000-8000-000000000004', 'Head employee (test)', '11111111-1111-4111-8111-111111111103');
+    ('5eed0000-0000-4000-8000-000000000004', 'Divya', null);
   insert into public.staff_assignments (staff_id, outlet_id, start_date)
   select id, v_main, current_date - 60 from public.staff where id::text like '5eed0000-%';
   insert into public.product_catalog (outlet_id, name, default_price) values

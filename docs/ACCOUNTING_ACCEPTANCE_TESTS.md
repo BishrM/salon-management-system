@@ -35,8 +35,10 @@ the real `/api/sync` endpoint — they are **not** real-tablet tests (those are 
 | E | ordinary expenses **paid from the drawer** (outside-drawer expenses are shown, not deducted — Rev 6 O2) | Σ |
 | Z | zakat | Σ |
 | F | food cost of the day | Σ food entries |
-| FC / FX | food funded by commission / extra paid by the shop | `FC = min(F, C)`, `FX = F − FC` (FX > 0 needs management approval, B6) |
-| payable | commission cash payable to the head | `C − FC` |
+| FC / FX | food funded by commission / extra paid by the shop | days **before** `food_rule_v2_from`: `FC = min(F, C)`, `FX = F − FC` (FX > 0 needs management approval, B6) |
+| B / LD / OW | breakfast / lunch + dinner / owed to the salon | days **from** `food_rule_v2_from` (D-31): `FX = B` (salon expense), `FC = min(LD, C)`, `OW = LD − FC` (no approval; repaid outside the drawer) |
+| final balance | commission left after lunch/dinner (negative = owed) | `C − LD` |
+| payable | commission cash payable to employees | `C − FC` |
 | N | SRS expected physical cash | `S − C + P − Paytm − E − Z` (SRS §3.5, verbatim) |
 | O | opening float | carried float R + pre-opening top-ups |
 | I | top-ups during the day | Σ |
@@ -46,7 +48,8 @@ the real `/api/sync` endpoint — they are **not** real-tablet tests (those are 
 | ED | expected in drawer | `O + I + CS − E − Z − Fd − H` |
 | V | difference | `counted − ED` (any V ≠ 0 needs a reason and approver acknowledgement, B2) |
 | RF / AF / FS / TH | required next-day float / float kept / float shortfall / taken home | `AF = min(counted, RF)`, `FS = max(0, RF − counted)`, `TH = max(0, counted − RF)` |
-Identity shown on the closing screen: `ED = O + I + N + (payable − H) + (F − f_today) − f_prior − FX`.
+Identity shown on the closing screen: `ED = O + I + N + (payable − H) + (F − f_today) − f_prior − FX − OW` (OW = 0 before D-31).
+ED itself does not depend on how food is split: only food actually paid from the drawer (Fd) reduces it.
 
 Commission rounding spot checks: S ₹99 → C ₹0 · S ₹100 → ₹10 · S ₹1,999 → ₹190 · S ₹15,550 → ₹1,550 (SRS §3.1).
 
@@ -281,6 +284,19 @@ a late entry (revision 3 was already submitted) → excluded with a reason. Audi
   `20261118001200_audit_global_rows.sql` (pgTAP 03 +4 tests; failed before, pass after); applied to
   staging; re-check: other-outlet owner sees 0 staff rows and only their own profile row; owner still sees
   their staff rows; manager still sees none.
+
+## S13 — Revised food rule (D-31), executed automatically (pgTAP 12, vitest `foodSplit`) and in the local UI
+| Day | S → C | Food | Expected | Result |
+|---|---|---|---|---|
+| D1 | ₹20,000 → ₹2,000 | breakfast ₹300, lunch ₹1,500 | FX ₹300, FC ₹1,500, OW ₹0, payable ₹500, balance +₹500 | PASS |
+| D2 (client example) | ₹15,000 → ₹1,500 | breakfast ₹300, lunch ₹1,000, dinner ₹500 | FX ₹300, FC ₹1,500, OW ₹0, payable ₹0, balance ₹0 | PASS |
+| D3 | ₹15,000 → ₹1,500 | lunch ₹1,000, dinner ₹800 | FC ₹1,500, OW ₹300, payable ₹0, balance −₹300; no approval blocker; N = ₹13,500 (food not deducted again); ED = O + CS = ₹17,000 | PASS |
+| Debt | — | — | pending ₹300 until approved; repaid ₹200 (owner, cash) → outstanding ₹100; over-repayment refused; reversal restores ₹300; frozen revision and next-day ED unchanged | PASS |
+| Old rule | ₹1,000 → ₹100 | breakfast ₹300 on a day before the start date | FC ₹100, FX ₹200, approval blocker (unchanged B6) | PASS |
+
+Local UI (2026-11-23, local Supabase, test data): breakfast ₹300 + lunch ₹1,000 + dinner ₹800 with S ₹15,000
+→ "Final balance − ₹300 owed to the salon"; after approval the Closing page showed ₹300 owed, a ₹200 cash
+repayment left ₹100. Not run on staging (not deployed).
 
 ## Sign-off
 | Scenario | Tester | Date | Result | Notes |

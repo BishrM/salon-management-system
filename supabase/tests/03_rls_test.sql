@@ -25,8 +25,8 @@ select is((select count(*)::int from public.audit_logs), 0, 'counter cannot read
 reset role;
 
 select tests.login_as('manager');
-select is((select count(*)::int from public.outlet_memberships), 5, 'manager sees all memberships of outlet A');
-select is((select count(*)::int from public.profiles), 5, 'manager sees profiles of outlet A members');
+select is((select count(*)::int from public.outlet_memberships), 4, 'manager sees all memberships of outlet A');
+select is((select count(*)::int from public.profiles), 4, 'manager sees profiles of outlet A members');
 select is((select count(*)::int from public.devices), 1, 'manager sees outlet devices');
 select is((select count(*)::int from public.audit_logs), 0, 'owner''s son cannot read the audit log (O16)');
 reset role;

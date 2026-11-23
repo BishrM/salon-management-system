@@ -8,9 +8,15 @@
   UPDATE/DELETE` privileges are revoked from `anon`/`authenticated`. Writes go only through an
   allow-list of `SECURITY DEFINER` RPCs with `search_path = ''` that check the caller's permission in
   the target outlet (`app.require_permission`) and take actor columns from `auth.uid()`.
-- **Roles are read from the database on every request** (never from JWT claims). Acting-head
-  delegation is valid only inside its time window, while not revoked and while the grantor still
-  holds owner/manager in the same outlet; self-grants are impossible (CHECK + RPC).
+- **Roles are read from the database on every request** (never from JWT claims). Since migration
+  `…001700` (D-28) there are two account types: the Owner side (`owner`, `manager`) and one shared
+  **Shop/Staff** login per outlet (`shop`), unique per outlet and limited to one outlet. Shop/Staff has
+  operational permissions only (entries, closing preparation/submission, Paytm, commission handover,
+  employees); approval, reopen, float, reviews, reports, users and audit stay Owner-side. Legacy `head`/
+  `counter` memberships and acting-head delegations are kept for history but grant nothing.
+- **Shared login and the audit trail**: every action by Shop/Staff is recorded with the Shop/Staff login
+  as actor. The closing's "performed by" employee (D-30) and repayment "handed over by" employees (D-31)
+  are attribution fields chosen in the form, never treated as who authenticated.
 - **Immutability**: revisions, revision children, closing events, float movements, handovers, late
   reviews, Paytm transactions and the audit log reject UPDATE/DELETE for every role (trigger), including
   the RPCs. Entries and food payments are never deleted; their timestamp evidence and identity are
@@ -26,8 +32,10 @@
 
 ## Verified by tests
 pgTAP: direct writes denied for every role, anon has no access, exact RPC allow-list, every definer
-function pins `search_path`, per-role permission matrix, cross-outlet isolation, delegation (active,
-expired, future, revoked, demoted grantor, self-grant, NULL end), immutability triggers.
+function pins `search_path`, per-role permission matrix (owner, manager, Shop/Staff), Shop/Staff has no
+owner-only permission and no access to another outlet, legacy head/counter/acting rows grant nothing,
+one Shop/Staff login per outlet and per login, cross-outlet isolation (incl. food debt and repayments),
+immutability triggers (incl. `food_repayments`).
 Concurrency script: device lock, duplicate ops, initial float, handover overshoot.
 
 ## Known issues / not yet verified

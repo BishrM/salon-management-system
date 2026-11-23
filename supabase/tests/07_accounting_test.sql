@@ -115,6 +115,7 @@ create function pg_temp.close_day(p_date date, p_den jsonb, p_handover bigint) r
 declare v_c uuid; v_r uuid;
 begin
   v_c := (public.prepare_closing(tests.outlet('A'), p_date) ->> 'closing_id')::uuid;
+  perform public.set_closing_employee(v_c, tests.staff('A'));
   perform public.update_draft(v_c, 640000, 400000, 240000, p_den, null, 'Owner (take-home)');
   if p_handover > 0 then perform public.record_handover(v_c, tests.staff('headstaff'), p_handover, 'drawer'); end if;
   v_r := public.submit_closing(v_c);
@@ -180,6 +181,7 @@ select lives_ok($$ select public.update_draft((select (public.prepare_closing(te
    640000, null, null, '{"50000":20,"10000":1,"5000":1}', 'drawer ₹100 short, cause unknown', 'Owner') $$, 'reason recorded');
 select lives_ok($$ select public.record_handover((select id from public.daily_closings where business_date = '2026-01-08'),
    tests.staff('headstaff'), 85000, 'drawer') $$, 'full commission handed over from the drawer');
+select public.set_closing_employee((select id from public.daily_closings where business_date = '2026-01-08'), tests.staff('A'));
 select lives_ok($$ insert into c select '2026-01-08', id, public.submit_closing(id) from public.daily_closings
                   where business_date = '2026-01-08' $$, 'D4 revision 1 submitted with V −100');
 reset role;

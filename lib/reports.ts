@@ -9,6 +9,10 @@ export type DayRow = {
   date: string; state: string; source: "revision" | "live";
   service: number; commission: number; products: number; productCash: number; productPaytm: number; paytm: number;
   expenses: number; expensesOutside: number; zakat: number; food: number; foodShop: number;
+  /** Food from commission and food owed to the salon by employees (D-31). */
+  foodCommission: number; foodOwed: number;
+  /** Employee recorded as performing the closing (D-30); "" when none. */
+  closedBy: string;
   opening: number; topUps: number; expected: number; counted: number; variance: number; requiredFloat: number;
   retained: number; shortfall: number; takeHome: number; commissionHandedDrawer: number;
 };
@@ -32,7 +36,7 @@ export function weekKey(date: string): string {
 }
 
 const NUMERIC: (keyof DayRow)[] = ["service", "commission", "products", "productCash", "productPaytm", "paytm", "expenses",
-  "expensesOutside", "zakat", "food", "foodShop", "topUps", "variance", "shortfall", "takeHome", "commissionHandedDrawer"];
+  "expensesOutside", "zakat", "food", "foodShop", "foodCommission", "foodOwed", "topUps", "variance", "shortfall", "takeHome", "commissionHandedDrawer"];
 
 /** Sum day rows into week/month buckets (balances such as opening/expected are not summed). */
 export function group(rows: DayRow[], by: "day" | "week" | "month"): (Pick<DayRow, (typeof NUMERIC)[number]> & { label: string; days: number })[] {
@@ -56,6 +60,7 @@ export async function loadReport(supabase: SupabaseClient, outletId: string, fro
     supabase.from("revision_commission_allocations").select("revision_id, staff_id, staff_name, service_total, allocated").eq("outlet_id", outletId),
     supabase.from("staff").select("id, full_name"),
   ]);
+  const staffById = new Map((staff ?? []).map((s) => [s.id, s.full_name as string]));
   const stateBy = new Map((states ?? []).map((s) => [s.business_date, s]));
   const revBy = new Map((revs ?? []).map((r) => [r.id, r]));
   const activeDates = new Set((entries ?? []).map((e) => e.business_date));
@@ -67,7 +72,7 @@ export async function loadReport(supabase: SupabaseClient, outletId: string, fro
     if (!activeDates.has(date)) continue;
     const st = stateBy.get(date);
     const frozen = st && (st.state === "submitted" || st.state === "approved") && st.current_revision_id;
-    let r: Record<string, number> & { state?: string };
+    let r: Record<string, number> & { state?: string; closed_by_staff_id?: string | null };
     if (frozen) {
       r = revBy.get(st.current_revision_id!);
     } else {
@@ -80,7 +85,9 @@ export async function loadReport(supabase: SupabaseClient, outletId: string, fro
       date, state: st?.state ?? "draft", source: frozen ? "revision" : "live",
       service: r.service_total, commission: r.commission_pool, products: r.product_total, productCash: r.product_cash,
       productPaytm: r.product_paytm, paytm: r.paytm_total, expenses: r.expenses_total, expensesOutside: r.expenses_outside_total,
-      zakat: r.zakat_total, food: r.food_cost, foodShop: r.food_shop_funded, opening: r.opening_float, topUps: r.intraday_top_ups,
+      zakat: r.zakat_total, food: r.food_cost, foodShop: r.food_shop_funded,
+      foodCommission: r.food_commission_funded, foodOwed: r.food_employee_owed ?? 0,
+      closedBy: (r.closed_by_staff_id && staffById.get(r.closed_by_staff_id)) || "", opening: r.opening_float, topUps: r.intraday_top_ups,
       expected: r.expected_drawer, counted: r.counted_cash, variance: frozen ? r.variance : 0, requiredFloat: r.required_float,
       retained: r.retained_float, shortfall: frozen ? r.float_shortfall : 0, takeHome: frozen ? r.take_home : 0,
       commissionHandedDrawer: r.drawer_handover_total,

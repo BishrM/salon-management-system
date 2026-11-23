@@ -9,7 +9,7 @@ real staff phone numbers. Production has **not** been created.
 | Vercel project | `salonops-staging` (team `bishrpapt-5536s-projects`), Node 24.x, framework Next.js |
 | Supabase project | `salonops-staging`, ref `nzwmfoixqffwqzntvscn`, region `ap-south-1`, Postgres 17, free plan |
 | Branch deployed | `salonops-v1` (never `main`) |
-| Test logins | owner, manager, head, counter, outsider (second outlet) — `*@salonops-staging.test`, random passwords kept **only** in the git-ignored `.env.staging.local` on the developer Mac (move them to the team password manager) |
+| Test logins | owner, manager, outsider (second outlet); head and counter are legacy and grant nothing once `…001700` is applied — a HUDCO **Shop/Staff** login must then be created (D-28) — `*@salonops-staging.test`, random passwords kept **only** in the git-ignored `.env.staging.local` on the developer Mac (move them to the team password manager) |
 | Outlets | "Staging Test Salon" and "Isolation Test Outlet (staging)" (simulated data) |
 
 **Deployments:** the Vercel project is linked to GitHub `BishrM/salon-management-system` with production
@@ -102,8 +102,9 @@ staging URL is reachable from the internet.
    select app.bootstrap_outlet('HUDCO Big Boss (STAGING)', 'Test address', '<owner user id>');
    ```
 3. Sign in to staging as that owner → Admin → Setup checklist: cutoff (04:00 suggested, B1),
-   denominations, test employees (invented names), catalogue, then Admin → Users → Create login for
-   test `manager`, `head`, `counter` accounts (each with its own strong password), then the initial float.
+   denominations, test employees (invented names), catalogue, then Admin → Logins → Create login for
+   test `manager` and the outlet's one **Shop/Staff** login (role "Shop/Staff", each with its own strong
+   password), then the initial float. Employees never get logins (D-28).
 4. For isolation checks, bootstrap a second outlet with a second owner.
 5. Record test credentials in the team password manager, not in the repository.
 
@@ -169,7 +170,7 @@ Pitfall found on staging: a masked/incorrect secret makes **Admin → Users → 
   `https://<staging-domain>/auth/callback` to Supabase redirect URLs.
 
 ### 2.4 After the first deploy (smoke test — done 2026-11-18, see RELEASE_READINESS §12)
-1. Open `/login` over HTTPS; sign in as each test role; confirm the counter is denied Admin/Reports.
+1. Open `/login` over HTTPS; sign in as each test role; confirm Shop/Staff is denied Approvals/Reports/Admin.
 2. Response headers on `/`: `X-Frame-Options: DENY`, `Strict-Transport-Security`, CSP `frame-ancestors 'none'`.
 3. `curl https://<staging>/_next/static/...` bundle grep for `service_role` → nothing.
 4. Register an entry on one browser and see it appear live on a second (Realtime).

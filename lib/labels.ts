@@ -11,6 +11,8 @@ export const BLOCKERS: Record<string, string> = {
   previous_day_not_submitted: "Submit the previous day's closing first.",
   initial_float_missing: "The owner must set up the starting cash float first (Admin → Float).",
   late_entries_undecided: "Some late entries need a management decision (include or exclude).",
+  closing_employee_missing: "Choose who performed the closing.",
+  closing_employee_invalid: "The employee chosen for the closing was not working here on this day. Choose again.",
 };
 
 export const WARNINGS: Record<string, string> = {

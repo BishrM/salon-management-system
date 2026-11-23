@@ -71,8 +71,8 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
       </div>
 
       <Card title="Cash reconciliation (per day)">
-        <Table head={["Day", "Status", "Opening", "Added", "Expected", "Counted", "Difference", "Float kept", "Shortfall", "Taken home"]}
-          rows={r.rows.map((d) => [<Link key="l" className="underline" href={`/closing/${d.date}`}>{d.date}</Link>, d.state, rupees(d.opening), rupees(d.topUps),
+        <Table head={["Day", "Status", "Closing by", "Opening", "Added", "Expected", "Counted", "Difference", "Float kept", "Shortfall", "Taken home"]}
+          rows={r.rows.map((d) => [<Link key="l" className="underline" href={`/closing/${d.date}`}>{d.date}</Link>, d.state, d.closedBy || "—", rupees(d.opening), rupees(d.topUps),
             rupees(d.expected), d.source === "revision" ? rupees(d.counted) : "—", d.source === "revision" ? signedRupees(d.variance) : "—",
             d.source === "revision" ? rupees(d.retained) : "—", d.source === "revision" ? rupees(d.shortfall) : "—", d.source === "revision" ? rupees(d.takeHome) : "—"])}
           empty="No closings in this period." />

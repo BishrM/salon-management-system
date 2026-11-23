@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-export type Role = "owner" | "manager" | "head" | "counter";
+export type Role = "owner" | "manager" | "shop";
 export type OutletRef = { id: string; name: string };
 
 export const OUTLET_COOKIE = "salonops_outlet";

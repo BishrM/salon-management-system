@@ -10,6 +10,7 @@ import { parseCsv, amountToPaise, normaliseStatus, toIsoIST } from "@/lib/csv";
 const day = (date: string, service: number, variance = 0): DayRow => ({
   date, state: "approved", source: "revision", service, commission: Math.floor(service / 10000) * 1000, products: 0,
   productCash: 0, productPaytm: 0, paytm: 0, expenses: 100, expensesOutside: 0, zakat: 0, food: 0, foodShop: 0,
+  foodCommission: 0, foodOwed: 0, closedBy: "",
   opening: 200000, topUps: 0, expected: 0, counted: 0, variance, requiredFloat: 200000, retained: 200000, shortfall: 0,
   takeHome: 0, commissionHandedDrawer: 0,
 });
